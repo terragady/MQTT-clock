@@ -4,6 +4,7 @@
 #include <WiFiClient.h>
 #include <LittleFS.h>
 #include <ArduinoJson.h>
+#include <queue>
 #include "DisplayManager.h"
 #include "TimeManager.h"
 
@@ -11,12 +12,13 @@
 struct NotificationConfig
 {
   String message;
-  bool isScrolling = true;  // true = scroll, false = static
-  int scrollRepeat = 1;     // how many times to scroll (1-10)
-  int scrollSpeed = 35;     // scroll speed in ms (5-100)
-  int brightness = -1;      // notification brightness (-1 = use current, 0-15)
-  bool flashEffect = false; // flash brightness effect (only for static)
-  int flashCount = 3;       // number of flashes (1-10)
+  bool isScrolling = true;      // true = scroll, false = static
+  int scrollRepeat = 1;         // how many times to scroll (1-10)
+  int scrollSpeed = 35;         // scroll speed in ms (5-100)
+  int brightness = -1;          // notification brightness (-1 = use current, 0-15)
+  bool flashEffect = false;     // flash brightness effect (only for static)
+  int flashCount = 3;           // number of flashes (1-10)
+  bool isSimpleMessage = false; // true if this is a simple string message
 };
 
 class MQTTManager
@@ -63,6 +65,7 @@ private:
   // Notification handling
   String currentNotification;
   bool showingNotification;
+  std::queue<NotificationConfig> notificationQueue;
 
   // Advanced notification state
   NotificationConfig currentConfig;
@@ -74,6 +77,8 @@ private:
   void showNotification(const String &message);
   void showAdvancedNotification(const NotificationConfig &config);
   void parseNotificationJson(const String &jsonString);
+  void processNotificationQueue();
+  void queueNotification(const NotificationConfig &config);
   bool isDayTime();
 
   // SPIFFS storage functions

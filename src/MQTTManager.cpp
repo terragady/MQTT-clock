@@ -44,6 +44,12 @@ void MQTTManager::loop()
   }
   mqttClient.loop();
 
+  // Process notification queue if not currently showing a notification
+  if (!showingNotification)
+  {
+    processNotificationQueue();
+  }
+
   // Update brightness based on current time (only if not showing notification)
   if (!showingNotification)
   {
@@ -239,7 +245,12 @@ void MQTTManager::handleMessage(const String &topic, const String &message)
     }
     else
     {
-      showNotification(message);
+      // Queue simple string message
+      NotificationConfig config;
+      config.message = message;
+      config.isSimpleMessage = true;
+      config.isScrolling = true; // Simple messages always scroll
+      queueNotification(config);
     }
   }
   else if (topic == MQTT_TOPIC_BRIGHTNESS_DAY)
@@ -512,6 +523,37 @@ void MQTTManager::parseNotificationJson(const String &jsonString)
   config.brightness = constrain(doc["brightness"] | -1, -1, 15);
   config.flashEffect = doc["flash"] | false;
   config.flashCount = constrain(doc["flash_count"] | 3, 1, 10);
+  config.isSimpleMessage = false;
 
-  showAdvancedNotification(config);
+  queueNotification(config);
+}
+
+void MQTTManager::queueNotification(const NotificationConfig &config)
+{
+  notificationQueue.push(config);
+  Serial.println("Notification queued: " + config.message + " (Queue size: " + String(notificationQueue.size()) + ")");
+}
+
+void MQTTManager::processNotificationQueue()
+{
+  if (notificationQueue.empty() || showingNotification)
+  {
+    return; // No notifications to process or already showing one
+  }
+
+  // Get the next notification from the queue
+  NotificationConfig config = notificationQueue.front();
+  notificationQueue.pop();
+
+  Serial.println("Processing notification from queue: " + config.message + " (Remaining in queue: " + String(notificationQueue.size()) + ")");
+
+  // Process the notification
+  if (config.isSimpleMessage)
+  {
+    showNotification(config.message);
+  }
+  else
+  {
+    showAdvancedNotification(config);
+  }
 }

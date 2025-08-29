@@ -1,4 +1,13 @@
 # Home Assistant Configuration for MQTT Clock
+# Updated for queue-based notification system
+
+# Features:
+# - Notification Queue: Multiple notifications are queued and processed sequentially
+# - No message loss: All notifications are processed in order
+# - Auto Discovery: Clock appears automatically in MQTT devices
+# - Blocking Display: Static notifications show for 3 seconds (no flash) or duration of flash animation
+# - Scrolling Speed: Configurable scroll speed (5ms=very fast, 100ms=very slow)
+# - Flash Effects: Brightness animations for static notifications
 
 # Add to your configuration.yaml
 
@@ -128,21 +137,13 @@ script:
           number:
             min: -1
             max: 15
-      time:
-        description: "Static display time in ms (1000-30000)"
-        default: 5000
-        selector:
-          number:
-            min: 1000
-            max: 30000
-            step: 500
       flash:
         description: "Flash effect (static notifications only)"
         default: false
         selector:
           boolean:
       flash_count:
-        description: "Number of flashes (1-10) - speed auto-calculated"
+        description: "Number of flashes (1-10)"
         default: 3
         selector:
           number:
@@ -159,7 +160,6 @@ script:
               "repeat": {{ repeat }},
               "speed": {{ speed }},
               "brightness": {{ brightness }},
-              "time": {{ time }},
               "flash": {{ flash | lower }},
               "flash_count": {{ flash_count }}
             }
@@ -176,7 +176,6 @@ script:
               "message": "🔔 DOORBELL",
               "scrolling": false,
               "brightness": 15,
-              "time": 8000,
               "flash": true,
               "flash_count": 5
             }
@@ -207,7 +206,6 @@ script:
               "message": "⚠️ SECURITY ALERT",
               "scrolling": false,
               "brightness": 15,
-              "time": 10000,
               "flash": true,
               "flash_count": 10
             }
@@ -239,7 +237,52 @@ script:
               "message": "🚨 EMERGENCY",
               "scrolling": false,
               "brightness": 15,
-              "time": 15000,
               "flash": true,
               "flash_count": 20
+            }
+
+  # Queue System Information:
+  # - All notifications are queued automatically
+  # - Multiple rapid notifications won't be lost
+  # - Notifications process sequentially (one after another)
+  # - MQTT connection stays alive during notification display
+  #
+  # Timing Behavior:
+  # - Static without flash: Shows for 3 seconds
+  # - Static with flash: Shows during flash animations (~1.6 seconds per flash)
+  # - Scrolling: Duration depends on message length, speed, and repeat count
+  # - Queue is processed automatically when current notification finishes
+  #
+  # JSON Parameters:
+  # - message: Text to display (required)
+  # - scrolling: true=scroll, false=static (default: true)
+  # - repeat: How many times to scroll (1-10, default: 1)
+  # - speed: Scroll speed in ms (5-100, lower=faster, default: 35)
+  # - brightness: -1=current, 0-15 (default: -1)
+  # - flash: true/false for brightness animation (default: false)
+  # - flash_count: Number of flash cycles (1-10, default: 3)
+
+  # Test queue system with multiple rapid notifications
+  test_notification_queue:
+    alias: "Test Notification Queue"
+    sequence:
+      - service: mqtt.publish
+        data:
+          topic: "clock/zegarTV/notification"
+          payload: "First Message"
+      - delay: "00:00:01" # Send second message 1 second later
+      - service: mqtt.publish
+        data:
+          topic: "clock/zegarTV/notification"
+          payload: "Second Message"
+      - delay: "00:00:01" # Send third message 1 second later
+      - service: mqtt.publish
+        data:
+          topic: "clock/zegarTV/notification"
+          payload: >
+            {
+              "message": "Third Message with Flash",
+              "scrolling": false,
+              "flash": true,
+              "flash_count": 2
             }
