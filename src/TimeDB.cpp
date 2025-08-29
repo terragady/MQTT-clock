@@ -10,7 +10,8 @@ time_t TimeDB::getTime()
 
   // Use the stored API key and timezone from Settings.h
   String apiGetData = "GET /v2.1/get-time-zone?key=" + apiKey + "&format=json&by=zone&zone=Europe/Oslo HTTP/1.1";
-  String result = "";
+  String result;
+  result.reserve(512); // Pre-allocate to reduce reallocations
 
   Serial.println("Connecting to time server...");
 
@@ -68,8 +69,8 @@ time_t TimeDB::getTime()
     return INVALID_TIME;
   }
 
-  // Parse JSON using newer ArduinoJson library
-  DynamicJsonDocument doc(1024);
+  // Parse JSON using ArduinoJson v7
+  JsonDocument doc;
   DeserializationError error = deserializeJson(doc, result);
 
   if (error)
@@ -79,13 +80,13 @@ time_t TimeDB::getTime()
     return INVALID_TIME;
   }
 
-  if (!doc.containsKey("timestamp"))
+  if (!doc["timestamp"].is<unsigned long>())
   {
     Serial.println("Timestamp not found in response");
     return INVALID_TIME;
   }
 
-  unsigned long timestamp = doc["timestamp"];
+  unsigned long timestamp = doc["timestamp"].as<unsigned long>();
   if (timestamp == 0)
   {
     Serial.println("Invalid timestamp received");
