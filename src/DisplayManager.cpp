@@ -9,6 +9,11 @@ DisplayManager::DisplayManager(Max72xxPanel &matrixRef) : matrix(matrixRef)
 
 void DisplayManager::scrollMessage(String msg)
 {
+  scrollMessage(msg, DISPLAY_SCROLL_SPEED); // Use default speed
+}
+
+void DisplayManager::scrollMessage(String msg, int speed)
+{
   msg += " "; // add a space at the end
   for (int i = 0; i < (int)(CHAR_WIDTH * msg.length() + matrix.width() - 1 - SPACER); i++)
   {
@@ -34,7 +39,7 @@ void DisplayManager::scrollMessage(String msg)
     }
 
     matrix.write(); // Send bitmap to display
-    delay(DISPLAY_SCROLL_SPEED);
+    delay(speed);   // Use custom speed parameter
   }
   matrix.setCursor(0, 0);
 }

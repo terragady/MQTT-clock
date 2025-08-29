@@ -92,14 +92,94 @@ script:
           topic: "clock/zegarTV/notification"
           payload: "{{ message }}"
 
-  # Quick notification scripts
+  # Advanced notification examples
+  send_advanced_notification:
+    alias: "Send Advanced Notification"
+    fields:
+      message:
+        description: "Message to display"
+        example: "Hello World!"
+        default: "Test message"
+        selector:
+          text:
+      scrolling:
+        description: "Scrolling or static display"
+        default: true
+        selector:
+          boolean:
+      repeat:
+        description: "How many times to scroll (1-10)"
+        default: 1
+        selector:
+          number:
+            min: 1
+            max: 10
+      speed:
+        description: "Scroll speed in ms (5-100, lower=faster)"
+        default: 35
+        selector:
+          number:
+            min: 5
+            max: 100
+      brightness:
+        description: "Notification brightness (-1=current, 0-15)"
+        default: -1
+        selector:
+          number:
+            min: -1
+            max: 15
+      time:
+        description: "Static display time in ms (1000-30000)"
+        default: 5000
+        selector:
+          number:
+            min: 1000
+            max: 30000
+            step: 500
+      flash:
+        description: "Flash effect (static notifications only)"
+        default: false
+        selector:
+          boolean:
+      flash_count:
+        description: "Number of flashes (1-10) - speed auto-calculated"
+        default: 3
+        selector:
+          number:
+            min: 1
+            max: 10
+    sequence:
+      - service: mqtt.publish
+        data:
+          topic: "clock/zegarTV/notification"
+          payload: >
+            {
+              "message": "{{ message }}",
+              "scrolling": {{ scrolling | lower }},
+              "repeat": {{ repeat }},
+              "speed": {{ speed }},
+              "brightness": {{ brightness }},
+              "time": {{ time }},
+              "flash": {{ flash | lower }},
+              "flash_count": {{ flash_count }}
+            }
+
+  # Quick notification scripts with advanced features
   send_doorbell_alert:
     alias: "Send Doorbell Alert"
     sequence:
       - service: mqtt.publish
         data:
           topic: "clock/zegarTV/notification"
-          payload: "🔔 DOORBELL"
+          payload: >
+            {
+              "message": "🔔 DOORBELL",
+              "scrolling": false,
+              "brightness": 15,
+              "time": 8000,
+              "flash": true,
+              "flash_count": 5
+            }
 
   send_mail_alert:
     alias: "Send Mail Alert"
@@ -107,7 +187,14 @@ script:
       - service: mqtt.publish
         data:
           topic: "clock/zegarTV/notification"
-          payload: "📬 Mail Delivered"
+          payload: >
+            {
+              "message": "📬 Mail Delivered",
+              "scrolling": true,
+              "repeat": 2,
+              "speed": 25,
+              "brightness": 10
+            }
 
   send_security_alert:
     alias: "Send Security Alert"
@@ -115,4 +202,44 @@ script:
       - service: mqtt.publish
         data:
           topic: "clock/zegarTV/notification"
-          payload: "⚠️ Security Alert"
+          payload: >
+            {
+              "message": "⚠️ SECURITY ALERT",
+              "scrolling": false,
+              "brightness": 15,
+              "time": 10000,
+              "flash": true,
+              "flash_count": 10
+            }
+
+  send_gentle_reminder:
+    alias: "Send Gentle Reminder"
+    sequence:
+      - service: mqtt.publish
+        data:
+          topic: "clock/zegarTV/notification"
+          payload: >
+            {
+              "message": "Take a break",
+              "scrolling": true,
+              "repeat": 1,
+              "speed": 50,
+              "brightness": 5,
+              "flash": false
+            }
+
+  send_emergency_alert:
+    alias: "Send Emergency Alert"
+    sequence:
+      - service: mqtt.publish
+        data:
+          topic: "clock/zegarTV/notification"
+          payload: >
+            {
+              "message": "🚨 EMERGENCY",
+              "scrolling": false,
+              "brightness": 15,
+              "time": 15000,
+              "flash": true,
+              "flash_count": 20
+            }

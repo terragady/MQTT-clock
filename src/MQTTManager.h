@@ -7,6 +7,18 @@
 #include "DisplayManager.h"
 #include "TimeManager.h"
 
+// Notification configuration structure
+struct NotificationConfig
+{
+  String message;
+  bool isScrolling = true;  // true = scroll, false = static
+  int scrollRepeat = 1;     // how many times to scroll (1-10)
+  int scrollSpeed = 35;     // scroll speed in ms (5-100)
+  int brightness = -1;      // notification brightness (-1 = use current, 0-15)
+  bool flashEffect = false; // flash brightness effect (only for static)
+  int flashCount = 3;       // number of flashes (1-10)
+};
+
 class MQTTManager
 {
 public:
@@ -50,13 +62,18 @@ private:
 
   // Notification handling
   String currentNotification;
-  unsigned long notificationStartTime;
   bool showingNotification;
+
+  // Advanced notification state
+  NotificationConfig currentConfig;
+  int originalBrightness;
 
   // Helper functions
   static void mqttCallback(char *topic, byte *payload, unsigned int length);
   void handleMessage(const String &topic, const String &message);
   void showNotification(const String &message);
+  void showAdvancedNotification(const NotificationConfig &config);
+  void parseNotificationJson(const String &jsonString);
   bool isDayTime();
 
   // SPIFFS storage functions

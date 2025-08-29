@@ -10,6 +10,7 @@ public:
 
   // Display operations
   void scrollMessage(String msg);
+  void scrollMessage(String msg, int speed); // Overloaded version with custom speed
   void centerPrint(String msg);
   void performBrightnessAnimation();
   void showUpdateIndicator();
@@ -19,7 +20,7 @@ public:
   void setIntensity(int intensity);
   void fillScreen(bool state);
   void write();
-  Max72xxPanel& getMatrix() { return matrix; }
+  Max72xxPanel &getMatrix() { return matrix; }
 
 private:
   Max72xxPanel &matrix;

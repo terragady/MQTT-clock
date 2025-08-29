@@ -9,7 +9,7 @@ MQTTManager::MQTTManager(DisplayManager &displayRef, TimeManager &timeRef)
     : display(displayRef), timeManager(timeRef), mqttClient(wifiClient),
       dayBrightness(DEFAULT_DAY_BRIGHTNESS), nightBrightness(DEFAULT_NIGHT_BRIGHTNESS),
       dayStartHour(DEFAULT_DAY_START_HOUR), nightStartHour(DEFAULT_NIGHT_START_HOUR),
-      showingNotification(false), notificationStartTime(0)
+      showingNotification(false), originalBrightness(-1)
 {
   instance = this; // Set static reference for callback
 }
@@ -29,9 +29,9 @@ void MQTTManager::initialize()
 
   mqttClient.setServer(MQTT_SERVER.c_str(), MQTT_PORT);
   mqttClient.setCallback(mqttCallback);
+  mqttClient.setBufferSize(1024); // Increased buffer size for discovery messages
 
   Serial.println("MQTT Manager initialized");
-  Serial.println("Server: " + MQTT_SERVER + ":" + String(MQTT_PORT));
 
   reconnect();
 }
@@ -44,8 +44,11 @@ void MQTTManager::loop()
   }
   mqttClient.loop();
 
-  // Update brightness based on current time
-  updateBrightnessBasedOnTime();
+  // Update brightness based on current time (only if not showing notification)
+  if (!showingNotification)
+  {
+    updateBrightnessBasedOnTime();
+  }
 }
 
 void MQTTManager::reconnect()
@@ -56,7 +59,8 @@ void MQTTManager::reconnect()
 
     String clientId = MQTT_CLIENT_ID + "-" + String(random(0xffff), HEX);
 
-    if (mqttClient.connect(clientId.c_str(), MQTT_USER.c_str(), MQTT_PASSWORD.c_str()))
+    if (mqttClient.connect(clientId.c_str(), MQTT_USER.c_str(), MQTT_PASSWORD.c_str(),
+                           MQTT_TOPIC_STATUS.c_str(), 0, true, "{\"status\":\"offline\"}"))
     {
       Serial.println(" connected!");
 
@@ -66,6 +70,7 @@ void MQTTManager::reconnect()
       mqttClient.subscribe(MQTT_TOPIC_BRIGHTNESS_NIGHT.c_str());
       mqttClient.subscribe(MQTT_TOPIC_SCHEDULE_DAY_START.c_str());
       mqttClient.subscribe(MQTT_TOPIC_SCHEDULE_NIGHT_START.c_str());
+      mqttClient.subscribe((MQTT_TOPIC_PREFIX + "/discovery").c_str());
 
       // Send discovery config and status
       sendDiscoveryConfig();
@@ -102,30 +107,112 @@ void MQTTManager::sendStatus(const String &status)
     payload += "\"is_day_time\":" + String(isDayTime() ? "true" : "false");
     payload += "}";
 
-    mqttClient.publish(MQTT_TOPIC_STATUS.c_str(), payload.c_str());
+    mqttClient.publish(MQTT_TOPIC_STATUS.c_str(), payload.c_str(), true); // Retained status
   }
 }
 
 void MQTTManager::sendDiscoveryConfig()
 {
-  if (mqttClient.connected())
+  if (!mqttClient.connected())
   {
-    String config = "{";
-    config += "\"name\":\"MQTT Clock\",";
-    config += "\"unique_id\":\"mqtt_clock_zegarTV\",";
-    config += "\"command_topic\":\"" + MQTT_TOPIC_NOTIFICATION + "\",";
-    config += "\"state_topic\":\"" + MQTT_TOPIC_STATUS + "\",";
-    config += "\"device\":{";
-    config += "\"identifiers\":[\"mqtt_clock\"],";
-    config += "\"name\":\"MQTT Clock\",";
-    config += "\"model\":\"ESP8266 LED Matrix\",";
-    config += "\"manufacturer\":\"Custom\"";
-    config += "}";
-    config += "}";
-
-    mqttClient.publish(MQTT_TOPIC_DISCOVERY.c_str(), config.c_str(), true);
-    Serial.println("Sent Home Assistant discovery config");
+    return;
   }
+
+  String device_id = "mqtt_clock_" + WiFi.macAddress();
+  device_id.replace(":", "");
+
+  // Device information shared across all entities
+  String device_info = "\"device\":{"
+                       "\"identifiers\":[\"" +
+                       device_id + "\"],"
+                                   "\"name\":\"MQTT Clock\","
+                                   "\"model\":\"ESP8266 LED Matrix Clock\","
+                                   "\"manufacturer\":\"Custom\","
+                                   "\"sw_version\":\"1.0\""
+                                   "}";
+
+  // 1. Status Sensor
+  String status_config = "{"
+                         "\"name\":\"Clock Status\","
+                         "\"unique_id\":\"" +
+                         device_id + "_status\","
+                                     "\"state_topic\":\"" +
+                         MQTT_TOPIC_STATUS + "\","
+                                             "\"value_template\":\"{{ value_json.status }}\","
+                                             "\"icon\":\"mdi:clock-digital\"," +
+                         device_info + "}";
+
+  mqttClient.publish("homeassistant/sensor/mqtt_clock/status/config", status_config.c_str(), true);
+
+  // 2. Current Time Sensor
+  String time_config = "{"
+                       "\"name\":\"Current Time\","
+                       "\"unique_id\":\"" +
+                       device_id + "_time\","
+                                   "\"state_topic\":\"" +
+                       MQTT_TOPIC_STATUS + "\","
+                                           "\"value_template\":\"{{ value_json.current_time }}\","
+                                           "\"icon\":\"mdi:clock\"," +
+                       device_info + "}";
+
+  mqttClient.publish("homeassistant/sensor/mqtt_clock/time/config", time_config.c_str(), true);
+
+  // 3. Day/Night Mode Sensor
+  String daynight_config = "{"
+                           "\"name\":\"Day/Night Mode\","
+                           "\"unique_id\":\"" +
+                           device_id + "_daynight\","
+                                       "\"state_topic\":\"" +
+                           MQTT_TOPIC_STATUS + "\","
+                                               "\"value_template\":\"{% if value_json.is_day_time %}Day{% else %}Night{% endif %}\","
+                                               "\"icon\":\"mdi:weather-sunny\"," +
+                           device_info + "}";
+
+  mqttClient.publish("homeassistant/sensor/mqtt_clock/daynight/config", daynight_config.c_str(), true);
+
+  // 4. Day Brightness Number Control
+  String day_brightness_config = "{"
+                                 "\"name\":\"Day Brightness\","
+                                 "\"unique_id\":\"" +
+                                 device_id + "_day_brightness\","
+                                             "\"state_topic\":\"" +
+                                 MQTT_TOPIC_STATUS + "\","
+                                                     "\"command_topic\":\"" +
+                                 MQTT_TOPIC_BRIGHTNESS_DAY + "\","
+                                                             "\"value_template\":\"{{ value_json.day_brightness }}\","
+                                                             "\"min\":0,\"max\":15,\"step\":1,"
+                                                             "\"icon\":\"mdi:brightness-6\"," +
+                                 device_info + "}";
+
+  mqttClient.publish("homeassistant/number/mqtt_clock/day_brightness/config", day_brightness_config.c_str(), true);
+
+  // 5. Night Brightness Number Control
+  String night_brightness_config = "{"
+                                   "\"name\":\"Night Brightness\","
+                                   "\"unique_id\":\"" +
+                                   device_id + "_night_brightness\","
+                                               "\"state_topic\":\"" +
+                                   MQTT_TOPIC_STATUS + "\","
+                                                       "\"command_topic\":\"" +
+                                   MQTT_TOPIC_BRIGHTNESS_NIGHT + "\","
+                                                                 "\"value_template\":\"{{ value_json.night_brightness }}\","
+                                                                 "\"min\":0,\"max\":15,\"step\":1,"
+                                                                 "\"icon\":\"mdi:brightness-3\"," +
+                                   device_info + "}";
+
+  mqttClient.publish("homeassistant/number/mqtt_clock/night_brightness/config", night_brightness_config.c_str(), true);
+
+  // 6. Notification Text Input
+  String notification_config = "{"
+                               "\"name\":\"Send Notification\","
+                               "\"unique_id\":\"" +
+                               device_id + "_notification\","
+                                           "\"command_topic\":\"" +
+                               MQTT_TOPIC_NOTIFICATION + "\","
+                                                         "\"icon\":\"mdi:message-text\"," +
+                               device_info + "}";
+
+  mqttClient.publish("homeassistant/text/mqtt_clock/notification/config", notification_config.c_str(), true);
 }
 
 void MQTTManager::mqttCallback(char *topic, byte *payload, unsigned int length)
@@ -143,13 +230,17 @@ void MQTTManager::mqttCallback(char *topic, byte *payload, unsigned int length)
 
 void MQTTManager::handleMessage(const String &topic, const String &message)
 {
-  Serial.println("MQTT message received:");
-  Serial.println("Topic: " + topic);
-  Serial.println("Message: " + message);
-
   if (topic == MQTT_TOPIC_NOTIFICATION)
   {
-    showNotification(message);
+    // Check if message is JSON (starts with '{')
+    if (message.startsWith("{"))
+    {
+      parseNotificationJson(message);
+    }
+    else
+    {
+      showNotification(message);
+    }
   }
   else if (topic == MQTT_TOPIC_BRIGHTNESS_DAY)
   {
@@ -183,6 +274,10 @@ void MQTTManager::handleMessage(const String &topic, const String &message)
       setNightStartHour(hour);
     }
   }
+  else if (topic == MQTT_TOPIC_PREFIX + "/discovery")
+  {
+    sendDiscoveryConfig();
+  }
 
   // Send updated status
   sendStatus("online");
@@ -192,7 +287,6 @@ void MQTTManager::showNotification(const String &message)
 {
   currentNotification = message;
   showingNotification = true;
-  notificationStartTime = millis();
 
   Serial.println("Showing notification: " + message);
   display.scrollMessage(message);
@@ -205,7 +299,6 @@ void MQTTManager::showNotification(const String &message)
 void MQTTManager::setDayBrightness(int brightness)
 {
   dayBrightness = constrain(brightness, 0, 15);
-  Serial.println("Day brightness set to: " + String(dayBrightness));
   updateBrightnessBasedOnTime();
   saveSettings(); // Save to SPIFFS
 }
@@ -213,7 +306,6 @@ void MQTTManager::setDayBrightness(int brightness)
 void MQTTManager::setNightBrightness(int brightness)
 {
   nightBrightness = constrain(brightness, 0, 15);
-  Serial.println("Night brightness set to: " + String(nightBrightness));
   updateBrightnessBasedOnTime();
   saveSettings(); // Save to SPIFFS
 }
@@ -221,7 +313,6 @@ void MQTTManager::setNightBrightness(int brightness)
 void MQTTManager::setDayStartHour(int hour)
 {
   dayStartHour = constrain(hour, 0, 23);
-  Serial.println("Day start hour set to: " + String(dayStartHour));
   updateBrightnessBasedOnTime();
   saveSettings(); // Save to SPIFFS
 }
@@ -229,7 +320,6 @@ void MQTTManager::setDayStartHour(int hour)
 void MQTTManager::setNightStartHour(int hour)
 {
   nightStartHour = constrain(hour, 0, 23);
-  Serial.println("Night start hour set to: " + String(nightStartHour));
   updateBrightnessBasedOnTime();
   saveSettings(); // Save to SPIFFS
 }
@@ -280,12 +370,6 @@ void MQTTManager::loadSettings()
   nightBrightness = doc["night_brightness"] | DEFAULT_NIGHT_BRIGHTNESS;
   dayStartHour = doc["day_start_hour"] | DEFAULT_DAY_START_HOUR;
   nightStartHour = doc["night_start_hour"] | DEFAULT_NIGHT_START_HOUR;
-
-  Serial.println("Settings loaded from SPIFFS:");
-  Serial.println("Day brightness: " + String(dayBrightness));
-  Serial.println("Night brightness: " + String(nightBrightness));
-  Serial.println("Day start hour: " + String(dayStartHour));
-  Serial.println("Night start hour: " + String(nightStartHour));
 }
 
 void MQTTManager::saveSettings()
@@ -308,10 +392,126 @@ void MQTTManager::saveSettings()
   {
     Serial.println("Failed to write settings to file");
   }
-  else
-  {
-    Serial.println("Settings saved to SPIFFS");
-  }
 
   file.close();
+}
+
+void MQTTManager::showAdvancedNotification(const NotificationConfig &config)
+{
+  currentConfig = config;
+  currentNotification = config.message;
+  showingNotification = true;
+
+  // Store original brightness if we need to change it
+  if (config.brightness >= 0)
+  {
+    originalBrightness = isDayTime() ? dayBrightness : nightBrightness;
+    display.setIntensity(config.brightness);
+  }
+
+  Serial.println("Showing advanced notification: " + config.message);
+  Serial.println("Scrolling: " + String(config.isScrolling ? "Yes" : "No"));
+  Serial.println("Repeats: " + String(config.scrollRepeat));
+  Serial.println("Speed: " + String(config.scrollSpeed) + "ms");
+  Serial.println("Brightness: " + String(config.brightness));
+  Serial.println("Flash effect: " + String(config.flashEffect ? "Yes" : "No"));
+  if (config.flashEffect)
+  {
+    Serial.println("Flash count: " + String(config.flashCount));
+  }
+
+  if (config.isScrolling)
+  {
+    // For scrolling notifications, flash effect is not supported
+    if (config.flashEffect)
+    {
+      Serial.println("Warning: Flash effect not supported for scrolling notifications");
+    }
+
+    // Perform all scrolling repeats (blocking)
+    Serial.println("Scrolling notification " + String(config.scrollRepeat) + " times");
+    for (int i = 0; i < config.scrollRepeat; i++)
+    {
+      Serial.println("Scroll repeat " + String(i + 1) + " of " + String(config.scrollRepeat));
+      display.scrollMessage(config.message, config.scrollSpeed);
+      if (i < config.scrollRepeat - 1) // Small delay between repeats (except last one)
+      {
+        delay(500);
+      }
+    }
+
+    // All scrolling done, return to clock
+    showingNotification = false;
+    if (originalBrightness >= 0)
+    {
+      display.setIntensity(originalBrightness);
+      originalBrightness = -1;
+    }
+    Serial.println("All scrolling completed - returning to clock display");
+  }
+  else
+  {
+    // Static notification
+    display.fillScreen(LOW);
+    display.centerPrint(config.message);
+
+    // If flash effect is requested, perform brightness animation multiple times
+    if (config.flashEffect)
+    {
+      Serial.println("Performing brightness animation " + String(config.flashCount) + " times");
+      for (int i = 0; i < config.flashCount; i++)
+      {
+        display.performBrightnessAnimation();
+      }
+
+      // Restore original brightness after all animations
+      if (originalBrightness >= 0)
+      {
+        display.setIntensity(originalBrightness);
+      }
+    }
+    else
+    {
+      // No flash effect - add delay to show the message
+      Serial.println("Static notification without flash - showing for 3 seconds");
+      delay(3000); // Show for 3 seconds
+    }
+
+    // Static notification is done (blocking), return to clock
+    showingNotification = false;
+    if (originalBrightness >= 0)
+    {
+      display.setIntensity(originalBrightness);
+      originalBrightness = -1;
+    }
+    Serial.println("Static notification completed - returning to clock display");
+  }
+}
+
+void MQTTManager::parseNotificationJson(const String &jsonString)
+{
+  JsonDocument doc;
+  DeserializationError error = deserializeJson(doc, jsonString);
+
+  if (error)
+  {
+    Serial.println("Failed to parse notification JSON, using simple message");
+    showNotification(jsonString);
+    return;
+  }
+
+  NotificationConfig config;
+
+  // Required field
+  config.message = doc["message"] | "No message";
+
+  // Optional fields with defaults
+  config.isScrolling = doc["scrolling"] | true;
+  config.scrollRepeat = constrain(doc["repeat"] | 1, 1, 10);
+  config.scrollSpeed = constrain(doc["speed"] | 35, 5, 100);
+  config.brightness = constrain(doc["brightness"] | -1, -1, 15);
+  config.flashEffect = doc["flash"] | false;
+  config.flashCount = constrain(doc["flash_count"] | 3, 1, 10);
+
+  showAdvancedNotification(config);
 }

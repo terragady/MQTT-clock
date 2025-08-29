@@ -54,7 +54,6 @@ const String MQTT_TOPIC_BRIGHTNESS_NIGHT = MQTT_TOPIC_PREFIX + "/brightness/nigh
 const String MQTT_TOPIC_SCHEDULE_DAY_START = MQTT_TOPIC_PREFIX + "/schedule/day_start";
 const String MQTT_TOPIC_SCHEDULE_NIGHT_START = MQTT_TOPIC_PREFIX + "/schedule/night_start";
 const String MQTT_TOPIC_STATUS = MQTT_TOPIC_PREFIX + "/status";
-const String MQTT_TOPIC_DISCOVERY = "homeassistant/text/mqtt_clock/config";
 
 // Brightness Settings
 const int DEFAULT_DAY_BRIGHTNESS = 8;    // Default day brightness (0-15)
