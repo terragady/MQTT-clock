@@ -79,6 +79,7 @@ private:
   void parseNotificationJson(const String &jsonString);
   void processNotificationQueue();
   void queueNotification(const NotificationConfig &config);
+  void playAnimation(const String &animationType);
   bool isDayTime();
 
   // SPIFFS storage functions

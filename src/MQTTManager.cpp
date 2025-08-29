@@ -72,6 +72,7 @@ void MQTTManager::reconnect()
 
       // Subscribe to topics
       mqttClient.subscribe(MQTT_TOPIC_NOTIFICATION.c_str());
+      mqttClient.subscribe(MQTT_TOPIC_ANIMATION.c_str());
       mqttClient.subscribe(MQTT_TOPIC_BRIGHTNESS_DAY.c_str());
       mqttClient.subscribe(MQTT_TOPIC_BRIGHTNESS_NIGHT.c_str());
       mqttClient.subscribe(MQTT_TOPIC_SCHEDULE_DAY_START.c_str());
@@ -109,7 +110,6 @@ void MQTTManager::sendStatus(const String &status)
     payload += "\"night_brightness\":" + String(nightBrightness) + ",";
     payload += "\"day_start_hour\":" + String(dayStartHour) + ",";
     payload += "\"night_start_hour\":" + String(nightStartHour) + ",";
-    payload += "\"current_time\":\"" + timeManager.getFormattedTime(true) + "\",";
     payload += "\"is_day_time\":" + String(isDayTime() ? "true" : "false");
     payload += "}";
 
@@ -150,20 +150,7 @@ void MQTTManager::sendDiscoveryConfig()
 
   mqttClient.publish("homeassistant/sensor/mqtt_clock/status/config", status_config.c_str(), true);
 
-  // 2. Current Time Sensor
-  String time_config = "{"
-                       "\"name\":\"Current Time\","
-                       "\"unique_id\":\"" +
-                       device_id + "_time\","
-                                   "\"state_topic\":\"" +
-                       MQTT_TOPIC_STATUS + "\","
-                                           "\"value_template\":\"{{ value_json.current_time }}\","
-                                           "\"icon\":\"mdi:clock\"," +
-                       device_info + "}";
-
-  mqttClient.publish("homeassistant/sensor/mqtt_clock/time/config", time_config.c_str(), true);
-
-  // 3. Day/Night Mode Sensor
+  // 2. Day/Night Mode Sensor
   String daynight_config = "{"
                            "\"name\":\"Day/Night Mode\","
                            "\"unique_id\":\"" +
@@ -176,7 +163,7 @@ void MQTTManager::sendDiscoveryConfig()
 
   mqttClient.publish("homeassistant/sensor/mqtt_clock/daynight/config", daynight_config.c_str(), true);
 
-  // 4. Day Brightness Number Control
+  // 3. Day Brightness Number Control
   String day_brightness_config = "{"
                                  "\"name\":\"Day Brightness\","
                                  "\"unique_id\":\"" +
@@ -192,7 +179,7 @@ void MQTTManager::sendDiscoveryConfig()
 
   mqttClient.publish("homeassistant/number/mqtt_clock/day_brightness/config", day_brightness_config.c_str(), true);
 
-  // 5. Night Brightness Number Control
+  // 4. Night Brightness Number Control
   String night_brightness_config = "{"
                                    "\"name\":\"Night Brightness\","
                                    "\"unique_id\":\"" +
@@ -208,7 +195,7 @@ void MQTTManager::sendDiscoveryConfig()
 
   mqttClient.publish("homeassistant/number/mqtt_clock/night_brightness/config", night_brightness_config.c_str(), true);
 
-  // 6. Notification Text Input
+  // 5. Notification Text Input
   String notification_config = "{"
                                "\"name\":\"Send Notification\","
                                "\"unique_id\":\"" +
@@ -289,6 +276,10 @@ void MQTTManager::handleMessage(const String &topic, const String &message)
   {
     sendDiscoveryConfig();
   }
+  else if (topic == MQTT_TOPIC_ANIMATION)
+  {
+    playAnimation(message);
+  }
 
   // Send updated status
   sendStatus("online");
@@ -304,6 +295,10 @@ void MQTTManager::showNotification(const String &message)
 
   // Reset notification flag after scroll completes
   showingNotification = false;
+
+  // Update brightness in case day/night changed during notification
+  updateBrightnessBasedOnTime();
+
   Serial.println("Notification display completed - returning to clock display");
 }
 
@@ -453,11 +448,10 @@ void MQTTManager::showAdvancedNotification(const NotificationConfig &config)
 
     // All scrolling done, return to clock
     showingNotification = false;
-    if (originalBrightness >= 0)
-    {
-      display.setIntensity(originalBrightness);
-      originalBrightness = -1;
-    }
+
+    // Update brightness in case day/night changed during notification
+    updateBrightnessBasedOnTime();
+
     Serial.println("All scrolling completed - returning to clock display");
   }
   else
@@ -475,27 +469,30 @@ void MQTTManager::showAdvancedNotification(const NotificationConfig &config)
         display.performBrightnessAnimation();
       }
 
-      // Restore original brightness after all animations
-      if (originalBrightness >= 0)
+      // If flash effect is requested, perform brightness animation multiple times
+      if (config.flashEffect)
       {
-        display.setIntensity(originalBrightness);
+        Serial.println("Performing brightness animation " + String(config.flashCount) + " times");
+        for (int i = 0; i < config.flashCount; i++)
+        {
+          display.performBrightnessAnimation();
+        }
       }
-    }
-    else
-    {
-      // No flash effect - add delay to show the message
-      Serial.println("Static notification without flash - showing for 3 seconds");
-      delay(3000); // Show for 3 seconds
-    }
+      else
+      {
+        // No flash effect - add delay to show the message
+        Serial.println("Static notification without flash - showing for 3 seconds");
+        delay(3000); // Show for 3 seconds
+      }
 
-    // Static notification is done (blocking), return to clock
-    showingNotification = false;
-    if (originalBrightness >= 0)
-    {
-      display.setIntensity(originalBrightness);
-      originalBrightness = -1;
+      // Static notification is done (blocking), return to clock
+      showingNotification = false;
+
+      // Update brightness in case day/night changed during notification
+      updateBrightnessBasedOnTime();
+
+      Serial.println("Static notification completed - returning to clock display");
     }
-    Serial.println("Static notification completed - returning to clock display");
   }
 }
 
@@ -556,4 +553,168 @@ void MQTTManager::processNotificationQueue()
   {
     showAdvancedNotification(config);
   }
+}
+
+void MQTTManager::playAnimation(const String &animationType)
+{
+  if (showingNotification)
+  {
+    Serial.println("Cannot play animation - notification in progress");
+    return;
+  }
+
+  Serial.println("Playing animation: " + animationType);
+  showingNotification = true; // Block other displays during animation
+
+  if (animationType == "heart")
+  {
+    // Centered heart animation - 4 beats, longer duration
+    Max72xxPanel &matrix = display.getMatrix();
+    for (int repeat = 0; repeat < 4; repeat++)
+    {
+      // Frame 1: Small heart (centered on 32x8 display)
+      display.fillScreen(LOW);
+      matrix.drawPixel(14, 2, HIGH); // Centered at x=15-16
+      matrix.drawPixel(15, 2, HIGH);
+      matrix.drawPixel(17, 2, HIGH);
+      matrix.drawPixel(18, 2, HIGH);
+      matrix.drawPixel(13, 3, HIGH);
+      matrix.drawPixel(16, 3, HIGH);
+      matrix.drawPixel(19, 3, HIGH);
+      matrix.drawPixel(14, 4, HIGH);
+      matrix.drawPixel(18, 4, HIGH);
+      matrix.drawPixel(15, 5, HIGH);
+      matrix.drawPixel(17, 5, HIGH);
+      matrix.drawPixel(16, 6, HIGH);
+      display.write();
+      delay(500); // Longer delay
+
+      // Frame 2: Large heart
+      display.fillScreen(LOW);
+      matrix.drawPixel(13, 1, HIGH);
+      matrix.drawPixel(14, 1, HIGH);
+      matrix.drawPixel(15, 1, HIGH);
+      matrix.drawPixel(17, 1, HIGH);
+      matrix.drawPixel(18, 1, HIGH);
+      matrix.drawPixel(19, 1, HIGH);
+      matrix.drawPixel(12, 2, HIGH);
+      matrix.drawPixel(16, 2, HIGH);
+      matrix.drawPixel(20, 2, HIGH);
+      matrix.drawPixel(12, 3, HIGH);
+      matrix.drawPixel(20, 3, HIGH);
+      matrix.drawPixel(13, 4, HIGH);
+      matrix.drawPixel(19, 4, HIGH);
+      matrix.drawPixel(14, 5, HIGH);
+      matrix.drawPixel(18, 5, HIGH);
+      matrix.drawPixel(15, 6, HIGH);
+      matrix.drawPixel(17, 6, HIGH);
+      matrix.drawPixel(16, 7, HIGH);
+      display.write();
+      delay(500); // Longer delay
+
+      // Frame 3: Back to small
+      display.fillScreen(LOW);
+      matrix.drawPixel(14, 2, HIGH);
+      matrix.drawPixel(15, 2, HIGH);
+      matrix.drawPixel(17, 2, HIGH);
+      matrix.drawPixel(18, 2, HIGH);
+      matrix.drawPixel(13, 3, HIGH);
+      matrix.drawPixel(16, 3, HIGH);
+      matrix.drawPixel(19, 3, HIGH);
+      matrix.drawPixel(14, 4, HIGH);
+      matrix.drawPixel(18, 4, HIGH);
+      matrix.drawPixel(15, 5, HIGH);
+      matrix.drawPixel(17, 5, HIGH);
+      matrix.drawPixel(16, 6, HIGH);
+      display.write();
+      delay(500); // Longer delay
+    }
+  }
+  else if (animationType == "wave")
+  {
+    // Longer wave animation
+    Max72xxPanel &matrix = display.getMatrix();
+    for (int x = 0; x < 48; x++) // More frames for longer animation
+    {
+      display.fillScreen(LOW);
+      for (int i = 0; i < 32; i += 2) // More points across display
+      {
+        int y = 4 + sin((x + i) * 0.3) * 2.5; // Smoother wave
+        if (y >= 0 && y < 8)
+        {
+          matrix.drawPixel(i, y, HIGH);
+        }
+      }
+      display.write();
+      delay(80); // Slightly slower
+    }
+  }
+  else if (animationType == "pulse")
+  {
+    // Simple expanding pulse animation (replaces star)
+    Max72xxPanel &matrix = display.getMatrix();
+
+    // Expand from center
+    for (int radius = 1; radius <= 8; radius++)
+    {
+      display.fillScreen(LOW);
+
+      // Draw expanding square/diamond
+      for (int x = 16 - radius; x <= 16 + radius && x < 32; x++)
+      {
+        for (int y = 4 - radius / 2; y <= 4 + radius / 2 && y >= 0 && y < 8; y++)
+        {
+          if (x >= 0 && x < 32 && y >= 0 && y < 8)
+          {
+            if (abs(x - 16) + abs(y - 4) == radius || abs(x - 16) + abs(y - 4) == radius - 1)
+            {
+              matrix.drawPixel(x, y, HIGH);
+            }
+          }
+        }
+      }
+      display.write();
+      delay(200);
+    }
+
+    // Contract back to center
+    for (int radius = 8; radius >= 1; radius--)
+    {
+      display.fillScreen(LOW);
+
+      if (radius <= 3)
+      {
+        // Final small pulse in center
+        matrix.drawPixel(16, 4, HIGH);
+        if (radius > 1)
+        {
+          matrix.drawPixel(15, 4, HIGH);
+          matrix.drawPixel(17, 4, HIGH);
+          matrix.drawPixel(16, 3, HIGH);
+          matrix.drawPixel(16, 5, HIGH);
+        }
+      }
+      display.write();
+      delay(200);
+    }
+  }
+  else
+  {
+    // Unknown animation - show error pattern
+    Serial.println("Unknown animation type: " + animationType + ". Available: heart, wave, pulse");
+    for (int i = 0; i < 3; i++)
+    {
+      display.fillScreen(HIGH);
+      delay(200);
+      display.fillScreen(LOW);
+      delay(200);
+    }
+  }
+
+  showingNotification = false;
+
+  // Update brightness in case day/night changed during animation
+  updateBrightnessBasedOnTime();
+
+  Serial.println("Animation completed - returning to clock display");
 }
