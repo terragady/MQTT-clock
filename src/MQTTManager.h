@@ -66,10 +66,7 @@ private:
   String currentNotification;
   bool showingNotification;
   std::queue<NotificationConfig> notificationQueue;
-
-  // Advanced notification state
   NotificationConfig currentConfig;
-  int originalBrightness;
 
   // Helper functions
   static void mqttCallback(char *topic, byte *payload, unsigned int length);
