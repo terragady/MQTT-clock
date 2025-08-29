@@ -19,6 +19,7 @@ public:
   void setIntensity(int intensity);
   void fillScreen(bool state);
   void write();
+  Max72xxPanel& getMatrix() { return matrix; }
 
 private:
   Max72xxPanel &matrix;

@@ -1,0 +1,118 @@
+# Home Assistant Configuration for MQTT Clock
+
+# Add to your configuration.yaml
+
+mqtt:
+  text:
+    - name: "MQTT Clock Notification"
+      command_topic: "clock/zegarTV/notification"
+      availability_topic: "clock/zegarTV/status"
+      max: 100
+
+  number:
+    - name: "Clock Day Brightness"
+      command_topic: "clock/zegarTV/brightness/day"
+      state_topic: "clock/zegarTV/status"
+      value_template: "{{ value_json.day_brightness }}"
+      min: 0
+      max: 15
+
+    - name: "Clock Night Brightness"
+      command_topic: "clock/zegarTV/brightness/night"
+      state_topic: "clock/zegarTV/status"
+      value_template: "{{ value_json.night_brightness }}"
+      min: 0
+      max: 15
+
+    - name: "Clock Day Start Hour"
+      command_topic: "clock/zegarTV/schedule/day_start"
+      state_topic: "clock/zegarTV/status"
+      value_template: "{{ value_json.day_start_hour }}"
+      min: 0
+      max: 23
+
+    - name: "Clock Night Start Hour"
+      command_topic: "clock/zegarTV/schedule/night_start"
+      state_topic: "clock/zegarTV/status"
+      value_template: "{{ value_json.night_start_hour }}"
+      min: 0
+      max: 23
+
+  sensor:
+    - name: "Clock Status"
+      state_topic: "clock/zegarTV/status"
+      value_template: "{{ value_json.status }}"
+
+    - name: "Clock Current Time"
+      state_topic: "clock/zegarTV/status"
+      value_template: "{{ value_json.current_time }}"
+
+    - name: "Clock Day/Night Mode"
+      state_topic: "clock/zegarTV/status"
+      value_template: "{% if value_json.is_day_time %}Day{% else %}Night{% endif %}"
+
+# Example automation for sending notifications
+automation:
+  - alias: "Send notification to clock"
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.front_door # Example trigger
+        to: "on"
+    action:
+      - service: mqtt.publish
+        data:
+          topic: "clock/zegarTV/notification"
+          payload: "Front door opened!"
+
+  - alias: "Doorbell notification to clock"
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.doorbell
+        to: "on"
+    action:
+      - service: mqtt.publish
+        data:
+          topic: "clock/zegarTV/notification"
+          payload: "DOORBELL"
+
+# Script for manual notification testing
+script:
+  send_clock_notification:
+    alias: "Send Clock Notification"
+    fields:
+      message:
+        description: "Message to display on clock"
+        example: "Hello World!"
+        default: "Test message"
+        selector:
+          text:
+    sequence:
+      - service: mqtt.publish
+        data:
+          topic: "clock/zegarTV/notification"
+          payload: "{{ message }}"
+
+  # Quick notification scripts
+  send_doorbell_alert:
+    alias: "Send Doorbell Alert"
+    sequence:
+      - service: mqtt.publish
+        data:
+          topic: "clock/zegarTV/notification"
+          payload: "🔔 DOORBELL"
+
+  send_mail_alert:
+    alias: "Send Mail Alert"
+    sequence:
+      - service: mqtt.publish
+        data:
+          topic: "clock/zegarTV/notification"
+          payload: "📬 Mail Delivered"
+
+  send_security_alert:
+    alias: "Send Security Alert"
+    sequence:
+      - service: mqtt.publish
+        data:
+          topic: "clock/zegarTV/notification"
+          payload: "⚠️ Security Alert"
