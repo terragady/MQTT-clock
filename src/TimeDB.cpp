@@ -1,81 +1,105 @@
 #include "TimeDB.h"
 
-TimeDB::TimeDB(String apiKey)
+TimeDB::TimeDB(String apiKey) : apiKey(apiKey)
 {
 }
 
 time_t TimeDB::getTime()
 {
   WiFiClient client;
-  String apiGetData = "GET /v2.1/get-time-zone?key=V4AL3Z4VF8D3&format=json&by=zone&zone=Europe/Oslo HTTP/1.1";
-  String result = "";
-  if (client.connect(servername, 80))
-  { // starts client connection, checks for connection
-    client.println(apiGetData);
-    client.println("Host: " + String(servername));
-    client.println("User-Agent: ArduinoWiFi/1.1");
-    client.println("Connection: close");
-    client.println();
-  }
-  else
+
+  // Use the stored API key and timezone from Settings.h
+  String apiGetData = "GET /v2.1/get-time-zone?key=" + apiKey + "&format=json&by=zone&zone=Europe/Oslo HTTP/1.1";
+  String result;
+  result.reserve(512); // Pre-allocate to reduce reallocations
+
+  Serial.println("Connecting to time server...");
+
+  if (!client.connect(servername, 80))
   {
-    Serial.println("connection for time data failed"); // error message if no client connect
-    Serial.println();
-    return 20;
+    Serial.println("Connection to time server failed");
+    return INVALID_TIME;
   }
 
+  // Send HTTP request
+  client.println(apiGetData);
+  client.println("Host: " + String(servername));
+  client.println("User-Agent: ESP8266-Clock/1.0");
+  client.println("Connection: close");
+  client.println();
+
+  // Wait for response with timeout
+  unsigned long timeout = millis();
   while (client.connected() && !client.available())
-    delay(1); // waits for data
+  {
+    if (millis() - timeout > CONNECTION_TIMEOUT)
+    {
+      Serial.println("Timeout waiting for server response");
+      client.stop();
+      return INVALID_TIME;
+    }
+    delay(1);
+  }
 
-  Serial.println("Waiting for data");
+  Serial.println("Reading response from server...");
 
-  boolean record = false;
+  // Read response
+  bool jsonStarted = false;
   while (client.connected() || client.available())
-  {                         // connected or data available
-    char c = client.read(); // gets byte from ethernet buffer
-    if (String(c) == "{")
+  {
+    char c = client.read();
+    if (c == '{')
     {
-      record = true;
+      jsonStarted = true;
     }
-    if (record)
+    if (jsonStarted)
     {
-      result = result + c;
+      result += c;
     }
-    if (String(c) == "}")
+    if (c == '}')
     {
-      record = false;
+      break; // Complete JSON received
     }
   }
-  client.stop(); // stop client
-  int TStart = result.lastIndexOf('{');
-  result = result.substring(TStart);
+  client.stop();
 
-  char jsonArray[result.length() + 1];
-  result.toCharArray(jsonArray, sizeof(jsonArray));
-  jsonArray[result.length() + 1] = '\0';
-  DynamicJsonBuffer json_buf;
-  JsonObject &root = json_buf.parseObject(jsonArray);
-  Serial.println();
-  Serial.print("Timestamp of time fetch: ");
-  Serial.println(root["formatted"].as<const char *>());
-  if (root["timestamp"] == 0)
+  if (result.length() == 0)
   {
-    return 20;
+    Serial.println("No valid JSON response received");
+    return INVALID_TIME;
   }
-  else
+
+  // Parse JSON using ArduinoJson v7
+  JsonDocument doc;
+  DeserializationError error = deserializeJson(doc, result);
+
+  if (error)
   {
-    return (unsigned long)root["timestamp"];
+    Serial.print("JSON parsing failed: ");
+    Serial.println(error.c_str());
+    return INVALID_TIME;
   }
+
+  if (!doc["timestamp"].is<unsigned long>())
+  {
+    Serial.println("Timestamp not found in response");
+    return INVALID_TIME;
+  }
+
+  unsigned long timestamp = doc["timestamp"].as<unsigned long>();
+  if (timestamp == 0)
+  {
+    Serial.println("Invalid timestamp received");
+    return INVALID_TIME;
+  }
+
+  Serial.print("Time fetched successfully: ");
+  Serial.println(doc["formatted"].as<String>());
+
+  return timestamp;
 }
 
 String TimeDB::zeroPad(int number)
 {
-  if (number < 10)
-  {
-    return "0" + String(number);
-  }
-  else
-  {
-    return String(number);
-  }
+  return (number < 10) ? "0" + String(number) : String(number);
 }

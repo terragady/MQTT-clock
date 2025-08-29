@@ -1,0 +1,288 @@
+# Home Assistant Configuration for MQTT Clock
+# Updated for queue-based notification system
+
+# Features:
+# - Notification Queue: Multiple notifications are queued and processed sequentially
+# - No message loss: All notifications are processed in order
+# - Auto Discovery: Clock appears automatically in MQTT devices
+# - Blocking Display: Static notifications show for 3 seconds (no flash) or duration of flash animation
+# - Scrolling Speed: Configurable scroll speed (5ms=very fast, 100ms=very slow)
+# - Flash Effects: Brightness animations for static notifications
+
+# Add to your configuration.yaml
+
+mqtt:
+  text:
+    - name: "MQTT Clock Notification"
+      command_topic: "clock/zegarTV/notification"
+      availability_topic: "clock/zegarTV/status"
+      max: 100
+
+  number:
+    - name: "Clock Day Brightness"
+      command_topic: "clock/zegarTV/brightness/day"
+      state_topic: "clock/zegarTV/status"
+      value_template: "{{ value_json.day_brightness }}"
+      min: 0
+      max: 15
+
+    - name: "Clock Night Brightness"
+      command_topic: "clock/zegarTV/brightness/night"
+      state_topic: "clock/zegarTV/status"
+      value_template: "{{ value_json.night_brightness }}"
+      min: 0
+      max: 15
+
+    - name: "Clock Day Start Hour"
+      command_topic: "clock/zegarTV/schedule/day_start"
+      state_topic: "clock/zegarTV/status"
+      value_template: "{{ value_json.day_start_hour }}"
+      min: 0
+      max: 23
+
+    - name: "Clock Night Start Hour"
+      command_topic: "clock/zegarTV/schedule/night_start"
+      state_topic: "clock/zegarTV/status"
+      value_template: "{{ value_json.night_start_hour }}"
+      min: 0
+      max: 23
+
+  sensor:
+    - name: "Clock Status"
+      state_topic: "clock/zegarTV/status"
+      value_template: "{{ value_json.status }}"
+
+    - name: "Clock Current Time"
+      state_topic: "clock/zegarTV/status"
+      value_template: "{{ value_json.current_time }}"
+
+    - name: "Clock Day/Night Mode"
+      state_topic: "clock/zegarTV/status"
+      value_template: "{% if value_json.is_day_time %}Day{% else %}Night{% endif %}"
+
+# Example automation for sending notifications
+automation:
+  - alias: "Send notification to clock"
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.front_door # Example trigger
+        to: "on"
+    action:
+      - service: mqtt.publish
+        data:
+          topic: "clock/zegarTV/notification"
+          payload: "Front door opened!"
+
+  - alias: "Doorbell notification to clock"
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.doorbell
+        to: "on"
+    action:
+      - service: mqtt.publish
+        data:
+          topic: "clock/zegarTV/notification"
+          payload: "DOORBELL"
+
+# Script for manual notification testing
+script:
+  send_clock_notification:
+    alias: "Send Clock Notification"
+    fields:
+      message:
+        description: "Message to display on clock"
+        example: "Hello World!"
+        default: "Test message"
+        selector:
+          text:
+    sequence:
+      - service: mqtt.publish
+        data:
+          topic: "clock/zegarTV/notification"
+          payload: "{{ message }}"
+
+  # Advanced notification examples
+  send_advanced_notification:
+    alias: "Send Advanced Notification"
+    fields:
+      message:
+        description: "Message to display"
+        example: "Hello World!"
+        default: "Test message"
+        selector:
+          text:
+      scrolling:
+        description: "Scrolling or static display"
+        default: true
+        selector:
+          boolean:
+      repeat:
+        description: "How many times to scroll (1-10)"
+        default: 1
+        selector:
+          number:
+            min: 1
+            max: 10
+      speed:
+        description: "Scroll speed in ms (5-100, lower=faster)"
+        default: 35
+        selector:
+          number:
+            min: 5
+            max: 100
+      brightness:
+        description: "Notification brightness (-1=current, 0-15)"
+        default: -1
+        selector:
+          number:
+            min: -1
+            max: 15
+      flash:
+        description: "Flash effect (static notifications only)"
+        default: false
+        selector:
+          boolean:
+      flash_count:
+        description: "Number of flashes (1-10)"
+        default: 3
+        selector:
+          number:
+            min: 1
+            max: 10
+    sequence:
+      - service: mqtt.publish
+        data:
+          topic: "clock/zegarTV/notification"
+          payload: >
+            {
+              "message": "{{ message }}",
+              "scrolling": {{ scrolling | lower }},
+              "repeat": {{ repeat }},
+              "speed": {{ speed }},
+              "brightness": {{ brightness }},
+              "flash": {{ flash | lower }},
+              "flash_count": {{ flash_count }}
+            }
+
+  # Quick notification scripts with advanced features
+  send_doorbell_alert:
+    alias: "Send Doorbell Alert"
+    sequence:
+      - service: mqtt.publish
+        data:
+          topic: "clock/zegarTV/notification"
+          payload: >
+            {
+              "message": "🔔 DOORBELL",
+              "scrolling": false,
+              "brightness": 15,
+              "flash": true,
+              "flash_count": 5
+            }
+
+  send_mail_alert:
+    alias: "Send Mail Alert"
+    sequence:
+      - service: mqtt.publish
+        data:
+          topic: "clock/zegarTV/notification"
+          payload: >
+            {
+              "message": "📬 Mail Delivered",
+              "scrolling": true,
+              "repeat": 2,
+              "speed": 25,
+              "brightness": 10
+            }
+
+  send_security_alert:
+    alias: "Send Security Alert"
+    sequence:
+      - service: mqtt.publish
+        data:
+          topic: "clock/zegarTV/notification"
+          payload: >
+            {
+              "message": "⚠️ SECURITY ALERT",
+              "scrolling": false,
+              "brightness": 15,
+              "flash": true,
+              "flash_count": 10
+            }
+
+  send_gentle_reminder:
+    alias: "Send Gentle Reminder"
+    sequence:
+      - service: mqtt.publish
+        data:
+          topic: "clock/zegarTV/notification"
+          payload: >
+            {
+              "message": "Take a break",
+              "scrolling": true,
+              "repeat": 1,
+              "speed": 50,
+              "brightness": 5,
+              "flash": false
+            }
+
+  send_emergency_alert:
+    alias: "Send Emergency Alert"
+    sequence:
+      - service: mqtt.publish
+        data:
+          topic: "clock/zegarTV/notification"
+          payload: >
+            {
+              "message": "🚨 EMERGENCY",
+              "scrolling": false,
+              "brightness": 15,
+              "flash": true,
+              "flash_count": 20
+            }
+
+  # Queue System Information:
+  # - All notifications are queued automatically
+  # - Multiple rapid notifications won't be lost
+  # - Notifications process sequentially (one after another)
+  # - MQTT connection stays alive during notification display
+  #
+  # Timing Behavior:
+  # - Static without flash: Shows for 3 seconds
+  # - Static with flash: Shows during flash animations (~1.6 seconds per flash)
+  # - Scrolling: Duration depends on message length, speed, and repeat count
+  # - Queue is processed automatically when current notification finishes
+  #
+  # JSON Parameters:
+  # - message: Text to display (required)
+  # - scrolling: true=scroll, false=static (default: true)
+  # - repeat: How many times to scroll (1-10, default: 1)
+  # - speed: Scroll speed in ms (5-100, lower=faster, default: 35)
+  # - brightness: -1=current, 0-15 (default: -1)
+  # - flash: true/false for brightness animation (default: false)
+  # - flash_count: Number of flash cycles (1-10, default: 3)
+
+  # Test queue system with multiple rapid notifications
+  test_notification_queue:
+    alias: "Test Notification Queue"
+    sequence:
+      - service: mqtt.publish
+        data:
+          topic: "clock/zegarTV/notification"
+          payload: "First Message"
+      - delay: "00:00:01" # Send second message 1 second later
+      - service: mqtt.publish
+        data:
+          topic: "clock/zegarTV/notification"
+          payload: "Second Message"
+      - delay: "00:00:01" # Send third message 1 second later
+      - service: mqtt.publish
+        data:
+          topic: "clock/zegarTV/notification"
+          payload: >
+            {
+              "message": "Third Message with Flash",
+              "scrolling": false,
+              "flash": true,
+              "flash_count": 2
+            }
