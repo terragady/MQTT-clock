@@ -9,38 +9,50 @@ MQTTManager::MQTTManager(DisplayManager &displayRef, TimeManager &timeRef)
     : display(displayRef), timeManager(timeRef), mqttClient(wifiClient),
       dayBrightness(DEFAULT_DAY_BRIGHTNESS), nightBrightness(DEFAULT_NIGHT_BRIGHTNESS),
       dayStartHour(DEFAULT_DAY_START_HOUR), nightStartHour(DEFAULT_NIGHT_START_HOUR),
-      showingNotification(false)
+      showingNotification(false), lastReconnectAttempt(0), reconnectAttempts(0),
+      filesystemAvailable(false)
 {
   instance = this; // Set static reference for callback
 }
 
 void MQTTManager::initialize()
 {
-  // Initialize SPIFFS first
-  if (!LittleFS.begin())
+  // Initialize LittleFS with retry
+  for (int attempt = 0; attempt < 3; attempt++)
   {
-    Serial.println("SPIFFS initialization failed! Using defaults.");
+    if (LittleFS.begin())
+    {
+      filesystemAvailable = true;
+      Serial.println("LittleFS initialized successfully");
+      loadSettings();
+      break;
+    }
+    Serial.print("LittleFS initialization attempt ");
+    Serial.print(attempt + 1);
+    Serial.println(" failed, retrying...");
+    delay(100);
   }
-  else
+
+  if (!filesystemAvailable)
   {
-    Serial.println("SPIFFS initialized successfully");
-    loadSettings(); // Load saved settings from SPIFFS
+    Serial.println("LittleFS initialization failed after 3 attempts! Using defaults.");
+    Serial.println("Settings will not be persisted.");
   }
 
   mqttClient.setServer(MQTT_SERVER.c_str(), MQTT_PORT);
   mqttClient.setCallback(mqttCallback);
-  mqttClient.setBufferSize(1024); // Increased buffer size for discovery messages
+  mqttClient.setBufferSize(MQTT_BUFFER_SIZE);
 
   Serial.println("MQTT Manager initialized");
 
-  reconnect();
+  tryReconnect();
 }
 
 void MQTTManager::loop()
 {
   if (!mqttClient.connected())
   {
-    reconnect();
+    tryReconnect();
   }
   mqttClient.loop();
 
@@ -57,42 +69,58 @@ void MQTTManager::loop()
   }
 }
 
-void MQTTManager::reconnect()
+bool MQTTManager::tryReconnect()
 {
-  while (!mqttClient.connected())
+  // Already connected
+  if (mqttClient.connected())
   {
-    Serial.print("Attempting MQTT connection...");
-
-    String clientId = MQTT_CLIENT_ID + "-" + String(random(0xffff), HEX);
-
-    if (mqttClient.connect(clientId.c_str(), MQTT_USER.c_str(), MQTT_PASSWORD.c_str(),
-                           MQTT_TOPIC_STATUS.c_str(), 0, true, "{\"status\":\"offline\"}"))
-    {
-      Serial.println(" connected!");
-
-      // Subscribe to topics
-      mqttClient.subscribe(MQTT_TOPIC_NOTIFICATION.c_str());
-      mqttClient.subscribe(MQTT_TOPIC_ANIMATION.c_str());
-      mqttClient.subscribe(MQTT_TOPIC_BRIGHTNESS_DAY.c_str());
-      mqttClient.subscribe(MQTT_TOPIC_BRIGHTNESS_NIGHT.c_str());
-      mqttClient.subscribe(MQTT_TOPIC_SCHEDULE_DAY_START.c_str());
-      mqttClient.subscribe(MQTT_TOPIC_SCHEDULE_NIGHT_START.c_str());
-      mqttClient.subscribe((MQTT_TOPIC_PREFIX + "/discovery").c_str());
-
-      // Send discovery config and status
-      sendDiscoveryConfig();
-      sendStatus("online");
-
-      Serial.println("Subscribed to MQTT topics");
-    }
-    else
-    {
-      Serial.print(" failed, rc=");
-      Serial.print(mqttClient.state());
-      Serial.println(" retrying in 5 seconds");
-      delay(5000);
-    }
+    reconnectAttempts = 0;
+    return true;
   }
+
+  // Check if enough time has passed since last attempt
+  unsigned long now = millis();
+  if (now - lastReconnectAttempt < MQTT_RECONNECT_INTERVAL)
+  {
+    return false;
+  }
+
+  lastReconnectAttempt = now;
+  reconnectAttempts++;
+
+  Serial.print("Attempting MQTT connection (attempt ");
+  Serial.print(reconnectAttempts);
+  Serial.print(")...");
+
+  String clientId = MQTT_CLIENT_ID + "-" + String(random(0xffff), HEX);
+
+  if (mqttClient.connect(clientId.c_str(), MQTT_USER.c_str(), MQTT_PASSWORD.c_str(),
+                         MQTT_TOPIC_STATUS.c_str(), 0, true, "{\"status\":\"offline\"}"))
+  {
+    Serial.println(" connected!");
+    reconnectAttempts = 0;
+
+    // Subscribe to topics
+    mqttClient.subscribe(MQTT_TOPIC_NOTIFICATION.c_str());
+    mqttClient.subscribe(MQTT_TOPIC_ANIMATION.c_str());
+    mqttClient.subscribe(MQTT_TOPIC_BRIGHTNESS_DAY.c_str());
+    mqttClient.subscribe(MQTT_TOPIC_BRIGHTNESS_NIGHT.c_str());
+    mqttClient.subscribe(MQTT_TOPIC_SCHEDULE_DAY_START.c_str());
+    mqttClient.subscribe(MQTT_TOPIC_SCHEDULE_NIGHT_START.c_str());
+    mqttClient.subscribe((MQTT_TOPIC_PREFIX + "/discovery").c_str());
+
+    // Send discovery config and status
+    sendDiscoveryConfig();
+    sendStatus("online");
+
+    Serial.println("Subscribed to MQTT topics");
+    return true;
+  }
+
+  Serial.print(" failed, rc=");
+  Serial.print(mqttClient.state());
+  Serial.println(" will retry later");
+  return false;
 }
 
 bool MQTTManager::isConnected()
@@ -374,6 +402,12 @@ void MQTTManager::loadSettings()
 
 void MQTTManager::saveSettings()
 {
+  if (!filesystemAvailable)
+  {
+    Serial.println("Filesystem not available, cannot save settings");
+    return;
+  }
+
   JsonDocument doc;
 
   doc["day_brightness"] = dayBrightness;
@@ -391,6 +425,10 @@ void MQTTManager::saveSettings()
   if (serializeJson(doc, file) == 0)
   {
     Serial.println("Failed to write settings to file");
+  }
+  else
+  {
+    Serial.println("Settings saved successfully");
   }
 
   file.close();

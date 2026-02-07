@@ -21,6 +21,11 @@ struct NotificationConfig
   bool isSimpleMessage = false; // true if this is a simple string message
 };
 
+// Timing constants
+const unsigned long MQTT_RECONNECT_INTERVAL = 5000; // Time between reconnect attempts (ms)
+const int MQTT_MAX_RECONNECT_ATTEMPTS = 3;          // Max attempts before yielding to loop
+const int MQTT_BUFFER_SIZE = 1024;                  // MQTT buffer size for discovery messages
+
 class MQTTManager
 {
 public:
@@ -29,8 +34,9 @@ public:
   // MQTT operations
   void initialize();
   void loop();
-  void reconnect();
+  bool tryReconnect(); // Non-blocking reconnect attempt
   bool isConnected();
+  bool isFilesystemAvailable() const { return filesystemAvailable; }
 
   // Message handling
   void sendStatus(const String &status);
@@ -78,6 +84,13 @@ private:
   void queueNotification(const NotificationConfig &config);
   void playAnimation(const String &animationType);
   bool isDayTime();
+
+  // Reconnection tracking
+  unsigned long lastReconnectAttempt;
+  int reconnectAttempts;
+
+  // Filesystem status
+  bool filesystemAvailable;
 
   // SPIFFS storage functions
   void loadSettings();

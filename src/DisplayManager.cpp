@@ -7,15 +7,15 @@ DisplayManager::DisplayManager(Max72xxPanel &matrixRef) : matrix(matrixRef)
 {
 }
 
-void DisplayManager::scrollMessage(String msg)
+void DisplayManager::scrollMessage(const String &msg)
 {
   scrollMessage(msg, DISPLAY_SCROLL_SPEED); // Use default speed
 }
 
-void DisplayManager::scrollMessage(String msg, int speed)
+void DisplayManager::scrollMessage(const String &msg, int speed)
 {
-  msg += " "; // add a space at the end
-  for (int i = 0; i < (int)(CHAR_WIDTH * msg.length() + matrix.width() - 1 - SPACER); i++)
+  String scrollMsg = msg + " "; // add a space at the end
+  for (int i = 0; i < (int)(CHAR_WIDTH * scrollMsg.length() + matrix.width() - 1 - SPACER); i++)
   {
     if (refresh == 1)
     {
@@ -30,9 +30,9 @@ void DisplayManager::scrollMessage(String msg, int speed)
 
     while (x + CHAR_WIDTH - SPACER >= 0 && letter >= 0)
     {
-      if (letter < (int)msg.length())
+      if (letter < (int)scrollMsg.length())
       {
-        matrix.drawChar(x, y, msg[letter], HIGH, LOW, 1);
+        matrix.drawChar(x, y, scrollMsg[letter], HIGH, LOW, 1);
       }
       letter--;
       x -= CHAR_WIDTH;
@@ -44,7 +44,7 @@ void DisplayManager::scrollMessage(String msg, int speed)
   matrix.setCursor(0, 0);
 }
 
-void DisplayManager::centerPrint(String msg)
+void DisplayManager::centerPrint(const String &msg)
 {
   int x = calculateCenterX(msg.length());
   matrix.setCursor(x, 0);

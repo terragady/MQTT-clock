@@ -9,9 +9,9 @@ public:
   DisplayManager(Max72xxPanel &matrixRef);
 
   // Display operations
-  void scrollMessage(String msg);
-  void scrollMessage(String msg, int speed); // Overloaded version with custom speed
-  void centerPrint(String msg);
+  void scrollMessage(const String &msg);
+  void scrollMessage(const String &msg, int speed); // Overloaded version with custom speed
+  void centerPrint(const String &msg);
   void performBrightnessAnimation();
   void showUpdateIndicator();
   void initializeMatrix();

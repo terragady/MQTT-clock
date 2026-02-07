@@ -9,7 +9,7 @@ time_t TimeDB::getTime()
   WiFiClient client;
 
   // Use the stored API key and timezone from Settings.h
-  String apiGetData = "GET /v2.1/get-time-zone?key=" + apiKey + "&format=json&by=zone&zone=Europe/Oslo HTTP/1.1";
+  String apiGetData = "GET /v2.1/get-time-zone?key=" + apiKey + "&format=json&by=zone&zone=" + TIMEZONE + " HTTP/1.1";
   String result;
   result.reserve(512); // Pre-allocate to reduce reallocations
 

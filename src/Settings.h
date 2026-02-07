@@ -1,3 +1,4 @@
+#pragma once
 
 #include <WiFiManager.h> // --> https://github.com/tzapu/WiFiManager
 #include "FS.h"

@@ -6,10 +6,16 @@
 #include "MQTTManager.h"
 #include "OTAManager.h"
 #include "WebOTAManager.h"
+#include <Ticker.h>
+
+// Timing constants
+const int LOOP_DELAY_MS = 100;                   // Main loop delay to prevent excessive CPU usage
+const unsigned long WIFI_CHECK_INTERVAL = 30000; // Check WiFi every 30 seconds
 
 // Global variables
-int refresh = 0;
+int refresh = 0; // Used by DisplayManager to signal scroll refresh
 Max72xxPanel matrix = Max72xxPanel(PIN_CS, NUMBER_OF_HORIZONTAL_DISPLAYS, NUMBER_OF_VERTICAL_DISPLAYS);
+unsigned long lastWiFiCheck = 0;
 
 // Core components
 TimeDB timeDB(TIMEZONE_DB_API_KEY);
@@ -24,6 +30,10 @@ void setup()
 {
   Serial.begin(115200);
   delay(10);
+
+  // Enable hardware watchdog (8 seconds timeout)
+  ESP.wdtEnable(WDTO_8S);
+  Serial.println("Watchdog enabled");
 
   // Initialize matrix display
   displayManager.initializeMatrix();
@@ -50,6 +60,16 @@ void setup()
 
 void loop()
 {
+  // Feed the watchdog to prevent reset
+  ESP.wdtFeed();
+
+  // Check WiFi connection periodically
+  if (millis() - lastWiFiCheck > WIFI_CHECK_INTERVAL)
+  {
+    lastWiFiCheck = millis();
+    wifiSetup.checkConnection();
+  }
+
   // Handle OTA updates
   otaManager.loop();
 
@@ -77,5 +97,5 @@ void loop()
     displayManager.centerPrint(currentTime);
   }
 
-  delay(100); // Small delay to prevent excessive CPU usage
+  delay(LOOP_DELAY_MS);
 }

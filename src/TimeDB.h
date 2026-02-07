@@ -25,6 +25,7 @@ SOFTWARE.
 #include <ESP8266WiFi.h>
 #include <TimeLib.h> // https://github.com/PaulStoffregen/Time
 #include <ArduinoJson.h>
+#include "Settings.h"
 
 class TimeDB
 {
