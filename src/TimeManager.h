@@ -3,6 +3,10 @@
 #include "TimeDB.h"
 #include "DisplayManager.h"
 
+// How often to retry the time server before the first successful sync (ms).
+// Prevents hammering the server every loop when there is no internet.
+const unsigned long TIME_SYNC_RETRY_INTERVAL_MS = 30000UL;
+
 class TimeManager
 {
 public:
@@ -23,6 +27,7 @@ public:
   String getLastMinute() const { return lastMinute; }
   long getLastEpoch() const { return lastEpoch; }
   long getFirstEpoch() const { return firstEpoch; }
+  bool isTimeSynced() const { return timeSynced; }
 
 private:
   TimeDB &timeDB;
@@ -33,4 +38,8 @@ private:
   long lastEpoch;
   long firstEpoch;
   int timeoutCount;
+
+  // Sync state
+  bool timeSynced;                  // true once we have a valid time at least once
+  unsigned long lastSyncAttemptMs;  // millis() of the last sync attempt (for backoff)
 };

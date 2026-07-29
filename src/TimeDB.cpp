@@ -45,8 +45,26 @@ time_t TimeDB::getTime()
 
   // Read response
   bool jsonStarted = false;
+  unsigned long readStart = millis();
   while (client.connected() || client.available())
   {
+    // Guard against a stalled connection: bound the read and keep the
+    // watchdog fed so a slow/incomplete response can never hang the device.
+    if (millis() - readStart > CONNECTION_TIMEOUT)
+    {
+      Serial.println("Timeout reading server response");
+      client.stop();
+      return INVALID_TIME;
+    }
+
+    // read() returns -1 when no byte is available yet; don't process it.
+    if (!client.available())
+    {
+      ESP.wdtFeed();
+      delay(1);
+      continue;
+    }
+
     char c = client.read();
     if (c == '{')
     {

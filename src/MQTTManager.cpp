@@ -39,13 +39,21 @@ void MQTTManager::initialize()
     Serial.println("Settings will not be persisted.");
   }
 
+  // Cap how long the underlying TCP connect can block so a missing or
+  // unreachable broker (e.g. an unresolved "homeassistant" hostname)
+  // cannot stall the main loop.
+  wifiClient.setTimeout(MQTT_CONNECT_TIMEOUT_MS);
+
   mqttClient.setServer(MQTT_SERVER.c_str(), MQTT_PORT);
   mqttClient.setCallback(mqttCallback);
   mqttClient.setBufferSize(MQTT_BUFFER_SIZE);
+  mqttClient.setSocketTimeout(MQTT_SOCKET_TIMEOUT_S); // cap MQTT handshake/read wait
 
   Serial.println("MQTT Manager initialized");
 
-  tryReconnect();
+  // Do NOT connect here. Connecting is handled lazily and rate-limited in
+  // loop() -> tryReconnect(), so setup() never blocks on an unreachable
+  // broker and OTA/Web/clock always come up.
 }
 
 void MQTTManager::loop()
@@ -94,8 +102,23 @@ bool MQTTManager::tryReconnect()
 
   String clientId = MQTT_CLIENT_ID + "-" + String(random(0xffff), HEX);
 
-  if (mqttClient.connect(clientId.c_str(), MQTT_USER.c_str(), MQTT_PASSWORD.c_str(),
-                         MQTT_TOPIC_STATUS.c_str(), 0, true, "{\"status\":\"offline\"}"))
+  // When no username is configured, connect anonymously: we must NOT send
+  // credentials at all. Sending an empty/incorrect username makes a broker
+  // that allows anonymous access reject us with "not authorised".
+  const String willMessage = "{\"status\":\"offline\"}";
+  bool connected;
+  if (MQTT_USER.length() == 0)
+  {
+    connected = mqttClient.connect(clientId.c_str(),
+                                   MQTT_TOPIC_STATUS.c_str(), 0, true, willMessage.c_str());
+  }
+  else
+  {
+    connected = mqttClient.connect(clientId.c_str(), MQTT_USER.c_str(), MQTT_PASSWORD.c_str(),
+                                   MQTT_TOPIC_STATUS.c_str(), 0, true, willMessage.c_str());
+  }
+
+  if (connected)
   {
     Serial.println(" connected!");
     reconnectAttempts = 0;
@@ -234,6 +257,51 @@ void MQTTManager::sendDiscoveryConfig()
                                device_info + "}";
 
   mqttClient.publish("homeassistant/text/mqtt_clock/notification/config", notification_config.c_str(), true);
+
+  // 6. Animation Select (dropdown: heart / wave / pulse)
+  String animation_config = "{"
+                            "\"name\":\"Animation\","
+                            "\"unique_id\":\"" +
+                            device_id + "_animation\","
+                                        "\"command_topic\":\"" +
+                            MQTT_TOPIC_ANIMATION + "\","
+                                                   "\"options\":[\"heart\",\"wave\",\"pulse\"],"
+                                                   "\"icon\":\"mdi:animation-play\"," +
+                            device_info + "}";
+
+  mqttClient.publish("homeassistant/select/mqtt_clock/animation/config", animation_config.c_str(), true);
+
+  // 7. Day Start Hour Number Control
+  String day_start_config = "{"
+                            "\"name\":\"Day Start Hour\","
+                            "\"unique_id\":\"" +
+                            device_id + "_day_start\","
+                                        "\"state_topic\":\"" +
+                            MQTT_TOPIC_STATUS + "\","
+                                                "\"command_topic\":\"" +
+                            MQTT_TOPIC_SCHEDULE_DAY_START + "\","
+                                                           "\"value_template\":\"{{ value_json.day_start_hour }}\","
+                                                           "\"min\":0,\"max\":23,\"step\":1,"
+                                                           "\"icon\":\"mdi:weather-sunset-up\"," +
+                            device_info + "}";
+
+  mqttClient.publish("homeassistant/number/mqtt_clock/day_start/config", day_start_config.c_str(), true);
+
+  // 8. Night Start Hour Number Control
+  String night_start_config = "{"
+                              "\"name\":\"Night Start Hour\","
+                              "\"unique_id\":\"" +
+                              device_id + "_night_start\","
+                                          "\"state_topic\":\"" +
+                              MQTT_TOPIC_STATUS + "\","
+                                                  "\"command_topic\":\"" +
+                              MQTT_TOPIC_SCHEDULE_NIGHT_START + "\","
+                                                               "\"value_template\":\"{{ value_json.night_start_hour }}\","
+                                                               "\"min\":0,\"max\":23,\"step\":1,"
+                                                               "\"icon\":\"mdi:weather-sunset-down\"," +
+                              device_info + "}";
+
+  mqttClient.publish("homeassistant/number/mqtt_clock/night_start/config", night_start_config.c_str(), true);
 }
 
 void MQTTManager::mqttCallback(char *topic, byte *payload, unsigned int length)

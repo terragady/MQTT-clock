@@ -48,14 +48,15 @@ void setup()
   // WiFi setup
   wifiSetup.initialize();
 
-  // Initialize MQTT
-  mqttManager.initialize();
-
-  // Initialize OTA
+  // Initialize OTA and Web OTA BEFORE any other network service.
+  // This guarantees firmware recovery is always reachable, even if a
+  // later service (MQTT/time) is slow or unreachable.
   otaManager.initialize();
-
-  // Initialize Web OTA
   webOtaManager.initialize();
+
+  // Initialize MQTT last. Connection is established lazily in loop()
+  // (see mqttManager.loop()), so this call never blocks startup.
+  mqttManager.initialize();
 }
 
 void loop()

@@ -7,6 +7,7 @@
 #include <Max72xxPanel.h> // --> https://github.com/markruys/arduino-Max72xxPanel
 #include <pgmspace.h>
 #include "TimeDB.h"
+#include "secrets.h" // Local, git-ignored credentials (see secrets.example.h)
 
 //******************************
 // Start Settings
@@ -18,7 +19,7 @@ const int DISPLAY_SCROLL_SPEED = 35;         // In milliseconds (slow = 35, norm
 const bool FLASH_ON_SECONDS = true;          // when true the : character in the time will flash on and off as a seconds indicator
 
 // API Configuration
-const String TIMEZONE_DB_API_KEY = "V4AL3Z4VF8D3"; // Move to secure storage in production
+const String TIMEZONE_DB_API_KEY = SECRET_TIMEZONE_DB_API_KEY;
 const String TIMEZONE = "Europe/Oslo";
 // Display Hardware Settings
 // CLK -> D5 (SCK)
@@ -41,10 +42,13 @@ const int LED_ROTATION = 3;
 const String DEVICE_HOSTNAME = "ZegarTV";
 
 // MQTT Settings
-const String MQTT_SERVER = "homeassistant"; // Home Assistant hostname or IP
+// Use the broker's IP rather than a bare hostname: the ESP8266's DNS resolver
+// often can't resolve names like "homeassistant" (that relies on mDNS).
+// Tip: give Home Assistant a DHCP reservation so this IP stays stable.
+const String MQTT_SERVER = "192.168.50.42"; // Home Assistant broker IP
 const int MQTT_PORT = 1883;
-const String MQTT_USER = "admin";    // Leave empty if no auth required
-const String MQTT_PASSWORD = "root"; // Leave empty if no auth required
+const String MQTT_USER = SECRET_MQTT_USER;
+const String MQTT_PASSWORD = SECRET_MQTT_PASSWORD;
 const String MQTT_CLIENT_ID = "mqtt-clock";
 const String MQTT_TOPIC_PREFIX = "clock/zegarTV";
 

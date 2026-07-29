@@ -25,6 +25,8 @@ struct NotificationConfig
 const unsigned long MQTT_RECONNECT_INTERVAL = 5000; // Time between reconnect attempts (ms)
 const int MQTT_MAX_RECONNECT_ATTEMPTS = 3;          // Max attempts before yielding to loop
 const int MQTT_BUFFER_SIZE = 1024;                  // MQTT buffer size for discovery messages
+const int MQTT_CONNECT_TIMEOUT_MS = 3000;           // Max blocking time for TCP connect (ms)
+const uint16_t MQTT_SOCKET_TIMEOUT_S = 3;           // Max blocking time for MQTT handshake/reads (s)
 
 class MQTTManager
 {
