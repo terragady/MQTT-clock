@@ -27,6 +27,7 @@ const int MQTT_MAX_RECONNECT_ATTEMPTS = 3;          // Max attempts before yield
 const int MQTT_BUFFER_SIZE = 1024;                  // MQTT buffer size for discovery messages
 const int MQTT_CONNECT_TIMEOUT_MS = 3000;           // Max blocking time for TCP connect (ms)
 const uint16_t MQTT_SOCKET_TIMEOUT_S = 3;           // Max blocking time for MQTT handshake/reads (s)
+const unsigned long MQTT_STATUS_PUBLISH_INTERVAL = 60000UL; // Periodic status refresh (ms)
 
 class MQTTManager
 {
@@ -43,19 +44,20 @@ public:
   // Message handling
   void sendStatus(const String &status);
   void sendDiscoveryConfig();
+  void publishNotificationHelp(); // Retained usage docs shown as HA attributes
 
   // Brightness management
   void setDayBrightness(int brightness);
   void setNightBrightness(int brightness);
-  void setDayStartHour(int hour);
-  void setNightStartHour(int hour);
+  void setDayStartMinutes(int minutes);
+  void setNightStartMinutes(int minutes);
   void updateBrightnessBasedOnTime();
 
   // Getters for current settings
   int getDayBrightness() const { return dayBrightness; }
   int getNightBrightness() const { return nightBrightness; }
-  int getDayStartHour() const { return dayStartHour; }
-  int getNightStartHour() const { return nightStartHour; }
+  int getDayStartMinutes() const { return dayStartMinutes; }
+  int getNightStartMinutes() const { return nightStartMinutes; }
   bool isShowingNotification() const { return showingNotification; }
 
 private:
@@ -67,8 +69,9 @@ private:
   // Brightness settings
   int dayBrightness;
   int nightBrightness;
-  int dayStartHour;
-  int nightStartHour;
+  // Schedule stored as minutes-since-midnight (0-1439) for HH:MM granularity.
+  int dayStartMinutes;
+  int nightStartMinutes;
 
   // Notification handling
   String currentNotification;
@@ -87,9 +90,17 @@ private:
   void playAnimation(const String &animationType);
   bool isDayTime();
 
+  // Time-of-day helpers for HH:MM schedule handling
+  static String minutesToTimeString(int minutes);      // e.g. 420 -> "07:00:00"
+  static int parseTimeStringToMinutes(const String &value); // "HH:MM[:SS]" -> minutes, -1 if invalid
+
   // Reconnection tracking
   unsigned long lastReconnectAttempt;
   int reconnectAttempts;
+
+  // Periodic status refresh so HA sensors (e.g. Day/Night mode) stay current
+  // even when no command arrives.
+  unsigned long lastStatusPublish;
 
   // Filesystem status
   bool filesystemAvailable;

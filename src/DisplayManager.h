@@ -32,4 +32,8 @@ private:
 
   // Helper functions
   int calculateCenterX(int textLength);
+
+  // Convert UTF-8 payloads (e.g. from MQTT) into the single-byte CP437 codes
+  // the LED font uses. Currently maps the degree sign; extend as needed.
+  String sanitizeText(const String &msg);
 };

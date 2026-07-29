@@ -8,9 +8,9 @@ MQTTManager *MQTTManager::instance = nullptr;
 MQTTManager::MQTTManager(DisplayManager &displayRef, TimeManager &timeRef)
     : display(displayRef), timeManager(timeRef), mqttClient(wifiClient),
       dayBrightness(DEFAULT_DAY_BRIGHTNESS), nightBrightness(DEFAULT_NIGHT_BRIGHTNESS),
-      dayStartHour(DEFAULT_DAY_START_HOUR), nightStartHour(DEFAULT_NIGHT_START_HOUR),
+      dayStartMinutes(DEFAULT_DAY_START_MINUTES), nightStartMinutes(DEFAULT_NIGHT_START_MINUTES),
       showingNotification(false), lastReconnectAttempt(0), reconnectAttempts(0),
-      filesystemAvailable(false)
+      lastStatusPublish(0), filesystemAvailable(false)
 {
   instance = this; // Set static reference for callback
 }
@@ -74,6 +74,14 @@ void MQTTManager::loop()
   if (!showingNotification)
   {
     updateBrightnessBasedOnTime();
+  }
+
+  // Periodically refresh status so HA sensors (Day/Night mode, etc.) stay
+  // current as the clock crosses a schedule boundary, even with no commands.
+  if (mqttClient.connected() &&
+      (millis() - lastStatusPublish >= MQTT_STATUS_PUBLISH_INTERVAL))
+  {
+    sendStatus("online");
   }
 }
 
@@ -159,12 +167,13 @@ void MQTTManager::sendStatus(const String &status)
     payload += "\"status\":\"" + status + "\",";
     payload += "\"day_brightness\":" + String(dayBrightness) + ",";
     payload += "\"night_brightness\":" + String(nightBrightness) + ",";
-    payload += "\"day_start_hour\":" + String(dayStartHour) + ",";
-    payload += "\"night_start_hour\":" + String(nightStartHour) + ",";
+    payload += "\"day_start\":\"" + minutesToTimeString(dayStartMinutes) + "\",";
+    payload += "\"night_start\":\"" + minutesToTimeString(nightStartMinutes) + "\",";
     payload += "\"is_day_time\":" + String(isDayTime() ? "true" : "false");
     payload += "}";
 
     mqttClient.publish(MQTT_TOPIC_STATUS.c_str(), payload.c_str(), true); // Retained status
+    lastStatusPublish = millis();
   }
 }
 
@@ -246,17 +255,24 @@ void MQTTManager::sendDiscoveryConfig()
 
   mqttClient.publish("homeassistant/number/mqtt_clock/night_brightness/config", night_brightness_config.c_str(), true);
 
-  // 5. Notification Text Input
+  // 5. Notification Text Input. The json_attributes_topic surfaces the usage
+  // docs (schema + examples) as entity attributes inside Home Assistant.
   String notification_config = "{"
                                "\"name\":\"Send Notification\","
                                "\"unique_id\":\"" +
                                device_id + "_notification\","
                                            "\"command_topic\":\"" +
                                MQTT_TOPIC_NOTIFICATION + "\","
-                                                         "\"icon\":\"mdi:message-text\"," +
+                                                         "\"json_attributes_topic\":\"" +
+                               MQTT_TOPIC_NOTIFICATION_HELP + "\","
+                                                              "\"icon\":\"mdi:message-text\"," +
                                device_info + "}";
 
   mqttClient.publish("homeassistant/text/mqtt_clock/notification/config", notification_config.c_str(), true);
+
+  // Publish the usage docs (retained) so they appear under the notification
+  // entity's Attributes in Home Assistant.
+  publishNotificationHelp();
 
   // 6. Animation Select (dropdown: heart / wave / pulse)
   String animation_config = "{"
@@ -271,37 +287,67 @@ void MQTTManager::sendDiscoveryConfig()
 
   mqttClient.publish("homeassistant/select/mqtt_clock/animation/config", animation_config.c_str(), true);
 
-  // 7. Day Start Hour Number Control
+  // Remove the previous hour-only "number" entities (superseded by the time
+  // entities below). Publishing an empty retained payload deletes a stale
+  // discovery config from Home Assistant.
+  mqttClient.publish("homeassistant/number/mqtt_clock/day_start/config", "", true);
+  mqttClient.publish("homeassistant/number/mqtt_clock/night_start/config", "", true);
+
+  // 7. Day Start Time (HH:MM). A Sun-based HA automation can write to this.
   String day_start_config = "{"
-                            "\"name\":\"Day Start Hour\","
+                            "\"name\":\"Day Start Time\","
                             "\"unique_id\":\"" +
-                            device_id + "_day_start\","
+                            device_id + "_day_start_time\","
                                         "\"state_topic\":\"" +
                             MQTT_TOPIC_STATUS + "\","
                                                 "\"command_topic\":\"" +
                             MQTT_TOPIC_SCHEDULE_DAY_START + "\","
-                                                           "\"value_template\":\"{{ value_json.day_start_hour }}\","
-                                                           "\"min\":0,\"max\":23,\"step\":1,"
+                                                           "\"value_template\":\"{{ value_json.day_start }}\","
                                                            "\"icon\":\"mdi:weather-sunset-up\"," +
                             device_info + "}";
 
-  mqttClient.publish("homeassistant/number/mqtt_clock/day_start/config", day_start_config.c_str(), true);
+  mqttClient.publish("homeassistant/time/mqtt_clock/day_start/config", day_start_config.c_str(), true);
 
-  // 8. Night Start Hour Number Control
+  // 8. Night Start Time (HH:MM). A Sun-based HA automation can write to this.
   String night_start_config = "{"
-                              "\"name\":\"Night Start Hour\","
+                              "\"name\":\"Night Start Time\","
                               "\"unique_id\":\"" +
-                              device_id + "_night_start\","
+                              device_id + "_night_start_time\","
                                           "\"state_topic\":\"" +
                               MQTT_TOPIC_STATUS + "\","
                                                   "\"command_topic\":\"" +
                               MQTT_TOPIC_SCHEDULE_NIGHT_START + "\","
-                                                               "\"value_template\":\"{{ value_json.night_start_hour }}\","
-                                                               "\"min\":0,\"max\":23,\"step\":1,"
+                                                               "\"value_template\":\"{{ value_json.night_start }}\","
                                                                "\"icon\":\"mdi:weather-sunset-down\"," +
                               device_info + "}";
 
-  mqttClient.publish("homeassistant/number/mqtt_clock/night_start/config", night_start_config.c_str(), true);
+  mqttClient.publish("homeassistant/time/mqtt_clock/night_start/config", night_start_config.c_str(), true);
+}
+
+void MQTTManager::publishNotificationHelp()
+{
+  if (!mqttClient.connected())
+  {
+    return;
+  }
+
+  // Each key becomes an attribute on the "Send Notification" entity in HA.
+  // Keep this compact so the whole packet stays within MQTT_BUFFER_SIZE.
+  String help = "{"
+                "\"usage\":\"Publish plain text (scrolls once) or a JSON object\","
+                "\"message\":\"string, required\","
+                "\"scrolling\":\"bool, default true; false = static/centered\","
+                "\"speed\":\"int 5-100 ms, default 35; lower = faster\","
+                "\"repeat\":\"int 1-10, default 1\","
+                "\"brightness\":\"int 0-15 or -1, default -1 (keep current)\","
+                "\"flash\":\"bool, default false (static only)\","
+                "\"flash_count\":\"int 1-10, default 3\","
+                "\"example\":\"{\\\"message\\\":\\\"Dinner!\\\",\\\"speed\\\":15,\\\"repeat\\\":2}\","
+                "\"animation\":\"publish heart|wave|pulse to " +
+                MQTT_TOPIC_ANIMATION + "\""
+                                       "}";
+
+  mqttClient.publish(MQTT_TOPIC_NOTIFICATION_HELP.c_str(), help.c_str(), true);
 }
 
 void MQTTManager::mqttCallback(char *topic, byte *payload, unsigned int length)
@@ -354,18 +400,18 @@ void MQTTManager::handleMessage(const String &topic, const String &message)
   }
   else if (topic == MQTT_TOPIC_SCHEDULE_DAY_START)
   {
-    int hour = message.toInt();
-    if (hour >= 0 && hour <= 23)
+    int minutes = parseTimeStringToMinutes(message);
+    if (minutes >= 0)
     {
-      setDayStartHour(hour);
+      setDayStartMinutes(minutes);
     }
   }
   else if (topic == MQTT_TOPIC_SCHEDULE_NIGHT_START)
   {
-    int hour = message.toInt();
-    if (hour >= 0 && hour <= 23)
+    int minutes = parseTimeStringToMinutes(message);
+    if (minutes >= 0)
     {
-      setNightStartHour(hour);
+      setNightStartMinutes(minutes);
     }
   }
   else if (topic == MQTT_TOPIC_PREFIX + "/discovery")
@@ -406,18 +452,49 @@ void MQTTManager::setNightBrightness(int brightness)
   saveSettings();
 }
 
-void MQTTManager::setDayStartHour(int hour)
+void MQTTManager::setDayStartMinutes(int minutes)
 {
-  dayStartHour = constrain(hour, 0, 23);
+  dayStartMinutes = constrain(minutes, 0, 1439);
   updateBrightnessBasedOnTime();
   saveSettings();
 }
 
-void MQTTManager::setNightStartHour(int hour)
+void MQTTManager::setNightStartMinutes(int minutes)
 {
-  nightStartHour = constrain(hour, 0, 23);
+  nightStartMinutes = constrain(minutes, 0, 1439);
   updateBrightnessBasedOnTime();
   saveSettings();
+}
+
+String MQTTManager::minutesToTimeString(int minutes)
+{
+  minutes = constrain(minutes, 0, 1439);
+  char buffer[9];
+  snprintf(buffer, sizeof(buffer), "%02d:%02d:00", minutes / 60, minutes % 60);
+  return String(buffer);
+}
+
+int MQTTManager::parseTimeStringToMinutes(const String &value)
+{
+  int firstColon = value.indexOf(':');
+  if (firstColon < 0)
+  {
+    return -1;
+  }
+
+  int parsedHour = value.substring(0, firstColon).toInt();
+
+  int secondColon = value.indexOf(':', firstColon + 1);
+  int parsedMinute = (secondColon < 0)
+                         ? value.substring(firstColon + 1).toInt()
+                         : value.substring(firstColon + 1, secondColon).toInt();
+
+  if (parsedHour < 0 || parsedHour > 23 || parsedMinute < 0 || parsedMinute > 59)
+  {
+    return -1;
+  }
+
+  return parsedHour * 60 + parsedMinute;
 }
 
 void MQTTManager::updateBrightnessBasedOnTime()
@@ -428,17 +505,17 @@ void MQTTManager::updateBrightnessBasedOnTime()
 
 bool MQTTManager::isDayTime()
 {
-  int currentHour = hour();
+  int currentMinutes = hour() * 60 + minute();
 
   // Handle normal case (day start < night start)
-  if (dayStartHour < nightStartHour)
+  if (dayStartMinutes < nightStartMinutes)
   {
-    return (currentHour >= dayStartHour && currentHour < nightStartHour);
+    return (currentMinutes >= dayStartMinutes && currentMinutes < nightStartMinutes);
   }
-  // Handle wrap-around case (night start < day start, e.g., day starts at 6, night starts at 22)
+  // Handle wrap-around case (night start < day start, e.g. day 06:30, night 22:00)
   else
   {
-    return (currentHour >= dayStartHour || currentHour < nightStartHour);
+    return (currentMinutes >= dayStartMinutes || currentMinutes < nightStartMinutes);
   }
 }
 
@@ -464,8 +541,29 @@ void MQTTManager::loadSettings()
   // Load settings with defaults if not found
   dayBrightness = doc["day_brightness"] | DEFAULT_DAY_BRIGHTNESS;
   nightBrightness = doc["night_brightness"] | DEFAULT_NIGHT_BRIGHTNESS;
-  dayStartHour = doc["day_start_hour"] | DEFAULT_DAY_START_HOUR;
-  nightStartHour = doc["night_start_hour"] | DEFAULT_NIGHT_START_HOUR;
+
+  // Prefer the new minute-based keys. Fall back to the legacy hour-only keys
+  // (from firmware before HH:MM support) so existing devices keep their schedule.
+  if (doc["day_start_minutes"].is<int>())
+  {
+    dayStartMinutes = doc["day_start_minutes"];
+  }
+  else
+  {
+    dayStartMinutes = (doc["day_start_hour"] | (DEFAULT_DAY_START_MINUTES / 60)) * 60;
+  }
+
+  if (doc["night_start_minutes"].is<int>())
+  {
+    nightStartMinutes = doc["night_start_minutes"];
+  }
+  else
+  {
+    nightStartMinutes = (doc["night_start_hour"] | (DEFAULT_NIGHT_START_MINUTES / 60)) * 60;
+  }
+
+  dayStartMinutes = constrain(dayStartMinutes, 0, 1439);
+  nightStartMinutes = constrain(nightStartMinutes, 0, 1439);
 }
 
 void MQTTManager::saveSettings()
@@ -480,8 +578,8 @@ void MQTTManager::saveSettings()
 
   doc["day_brightness"] = dayBrightness;
   doc["night_brightness"] = nightBrightness;
-  doc["day_start_hour"] = dayStartHour;
-  doc["night_start_hour"] = nightStartHour;
+  doc["day_start_minutes"] = dayStartMinutes;
+  doc["night_start_minutes"] = nightStartMinutes;
 
   File file = LittleFS.open("/clock_settings.json", "w");
   if (!file)

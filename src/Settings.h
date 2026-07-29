@@ -54,6 +54,7 @@ const String MQTT_TOPIC_PREFIX = "clock/zegarTV";
 
 // MQTT Topics
 const String MQTT_TOPIC_NOTIFICATION = MQTT_TOPIC_PREFIX + "/notification";
+const String MQTT_TOPIC_NOTIFICATION_HELP = MQTT_TOPIC_PREFIX + "/notification/help"; // Retained usage docs (HA attributes)
 const String MQTT_TOPIC_ANIMATION = MQTT_TOPIC_PREFIX + "/animation";
 const String MQTT_TOPIC_BRIGHTNESS_DAY = MQTT_TOPIC_PREFIX + "/brightness/day";
 const String MQTT_TOPIC_BRIGHTNESS_NIGHT = MQTT_TOPIC_PREFIX + "/brightness/night";
@@ -62,7 +63,10 @@ const String MQTT_TOPIC_SCHEDULE_NIGHT_START = MQTT_TOPIC_PREFIX + "/schedule/ni
 const String MQTT_TOPIC_STATUS = MQTT_TOPIC_PREFIX + "/status";
 
 // Brightness Settings
-const int DEFAULT_DAY_BRIGHTNESS = 8;    // Default day brightness (0-15)
-const int DEFAULT_NIGHT_BRIGHTNESS = 1;  // Default night brightness (0-15)
-const int DEFAULT_DAY_START_HOUR = 7;    // Default day mode start hour (24h format)
-const int DEFAULT_NIGHT_START_HOUR = 22; // Default night mode start hour (24h format)
+const int DEFAULT_DAY_BRIGHTNESS = 8;   // Default day brightness (0-15)
+const int DEFAULT_NIGHT_BRIGHTNESS = 1; // Default night brightness (0-15)
+// Day/Night schedule is stored as minutes-since-midnight (0-1439) so it can be
+// set to any HH:MM, not just whole hours. Home Assistant exposes these as
+// "time" entities that a Sun-based automation can drive automatically.
+const int DEFAULT_DAY_START_MINUTES = 7 * 60;    // 07:00
+const int DEFAULT_NIGHT_START_MINUTES = 22 * 60; // 22:00
