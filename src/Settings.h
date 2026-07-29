@@ -40,6 +40,9 @@ const int LED_ROTATION = 3;
 
 // Network Settings
 const String DEVICE_HOSTNAME = "ZegarTV";
+// SSID of the WiFiManager configuration portal shown on first boot / when it
+// cannot join a known network.
+const String WIFI_PORTAL_AP_NAME = "Zegar TV";
 
 // MQTT Settings
 // Use the broker's IP rather than a bare hostname: the ESP8266's DNS resolver

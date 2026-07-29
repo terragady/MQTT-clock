@@ -6,6 +6,7 @@
 #include "MQTTManager.h"
 #include "OTAManager.h"
 #include "WebOTAManager.h"
+#include "BackgroundService.h"
 #include <Ticker.h>
 
 // Timing constants
@@ -17,6 +18,10 @@ int refresh = 0; // Used by DisplayManager to signal scroll refresh
 Max72xxPanel matrix = Max72xxPanel(PIN_CS, NUMBER_OF_HORIZONTAL_DISPLAYS, NUMBER_OF_VERTICAL_DISPLAYS);
 unsigned long lastWiFiCheck = 0;
 
+// Set once setup() has initialized OTA/web/MQTT. Until then serviceBackground()
+// only feeds the watchdog, so boot-time scrolls never touch an unstarted service.
+bool servicesReady = false;
+
 // Core components
 TimeDB timeDB(TIMEZONE_DB_API_KEY);
 DisplayManager displayManager(matrix);
@@ -25,6 +30,37 @@ TimeManager timeManager(timeDB, displayManager);
 MQTTManager mqttManager(displayManager, timeManager);
 OTAManager otaManager(displayManager);
 WebOTAManager webOtaManager(displayManager);
+
+// Keep background services alive during otherwise-blocking display operations
+// (see BackgroundService.h). Feeding the watchdog is always safe; the network
+// services are only pumped once setup() has started them.
+void serviceBackground()
+{
+  ESP.wdtFeed();
+  if (!servicesReady)
+  {
+    return;
+  }
+  otaManager.loop();
+  webOtaManager.loop();
+  mqttManager.keepAlive();
+}
+
+void serviceDelay(unsigned long ms)
+{
+  unsigned long start = millis();
+  while (true)
+  {
+    serviceBackground();
+    unsigned long elapsed = millis() - start;
+    if (elapsed >= ms)
+    {
+      break;
+    }
+    unsigned long remaining = ms - elapsed;
+    delay(remaining > 15 ? 15 : remaining);
+  }
+}
 
 void setup()
 {
@@ -57,6 +93,10 @@ void setup()
   // Initialize MQTT last. Connection is established lazily in loop()
   // (see mqttManager.loop()), so this call never blocks startup.
   mqttManager.initialize();
+
+  // All network services are up: allow serviceBackground() to pump them during
+  // long display operations from now on.
+  servicesReady = true;
 }
 
 void loop()

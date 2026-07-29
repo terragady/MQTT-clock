@@ -1,5 +1,6 @@
 #include "DisplayManager.h"
 #include "Settings.h"
+#include "BackgroundService.h"
 
 extern int refresh; // Global refresh flag from main
 
@@ -38,8 +39,8 @@ void DisplayManager::scrollMessage(const String &msg, int speed)
       x -= CHAR_WIDTH;
     }
 
-    matrix.write(); // Send bitmap to display
-    delay(speed);   // Use custom speed parameter
+    matrix.write();       // Send bitmap to display
+    serviceDelay(speed);  // Wait per-step while keeping background services alive
   }
   matrix.setCursor(0, 0);
 }
@@ -51,6 +52,24 @@ void DisplayManager::centerPrint(const String &msg)
   matrix.setCursor(x, 0);
   matrix.print(text);
   matrix.write();
+}
+
+void DisplayManager::fadeMessage(int targetBrightness, int stepDelayMs)
+{
+  targetBrightness = constrain(targetBrightness, 0, 15);
+
+  // Fade out
+  for (int level = targetBrightness; level >= 0; level--)
+  {
+    matrix.setIntensity(level);
+    delay(stepDelayMs);
+  }
+  // Fade back in
+  for (int level = 0; level <= targetBrightness; level++)
+  {
+    matrix.setIntensity(level);
+    delay(stepDelayMs);
+  }
 }
 
 void DisplayManager::performBrightnessAnimation()

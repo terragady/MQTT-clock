@@ -1,5 +1,6 @@
 #include "MQTTManager.h"
 #include "Settings.h"
+#include "BackgroundService.h"
 #include <TimeLib.h>
 
 // Static member initialization
@@ -82,6 +83,17 @@ void MQTTManager::loop()
       (millis() - lastStatusPublish >= MQTT_STATUS_PUBLISH_INTERVAL))
   {
     sendStatus("online");
+  }
+}
+
+void MQTTManager::keepAlive()
+{
+  // Pump only the MQTT client (keepalive + incoming). Intentionally does NOT
+  // run the notification queue or brightness logic, so it is safe to call from
+  // inside a blocking display operation without re-entering it.
+  if (mqttClient.connected())
+  {
+    mqttClient.loop();
   }
 }
 
@@ -177,6 +189,36 @@ void MQTTManager::sendStatus(const String &status)
   }
 }
 
+String MQTTManager::getDeviceId()
+{
+  String deviceId = "mqtt_clock_" + WiFi.macAddress();
+  deviceId.replace(":", "");
+  return deviceId;
+}
+
+String MQTTManager::buildDeviceInfo()
+{
+  return "\"device\":{"
+         "\"identifiers\":[\"" +
+         getDeviceId() + "\"],"
+                         "\"name\":\"MQTT Clock\","
+                         "\"model\":\"ESP8266 LED Matrix Clock\","
+                         "\"manufacturer\":\"Custom\","
+                         "\"sw_version\":\"1.0\""
+                         "}";
+}
+
+void MQTTManager::publishDiscovery(const String &component, const String &objectId, const String &fields)
+{
+  if (!mqttClient.connected())
+  {
+    return;
+  }
+  String payload = "{" + fields + "," + buildDeviceInfo() + "}";
+  String topic = "homeassistant/" + component + "/mqtt_clock/" + objectId + "/config";
+  mqttClient.publish(topic.c_str(), payload.c_str(), true);
+}
+
 void MQTTManager::sendDiscoveryConfig()
 {
   if (!mqttClient.connected())
@@ -184,108 +226,79 @@ void MQTTManager::sendDiscoveryConfig()
     return;
   }
 
-  String device_id = "mqtt_clock_" + WiFi.macAddress();
-  device_id.replace(":", "");
-
-  // Device information shared across all entities
-  String device_info = "\"device\":{"
-                       "\"identifiers\":[\"" +
-                       device_id + "\"],"
-                                   "\"name\":\"MQTT Clock\","
-                                   "\"model\":\"ESP8266 LED Matrix Clock\","
-                                   "\"manufacturer\":\"Custom\","
-                                   "\"sw_version\":\"1.0\""
-                                   "}";
+  const String id = getDeviceId();
 
   // 1. Status Sensor
-  String status_config = "{"
-                         "\"name\":\"Clock Status\","
-                         "\"unique_id\":\"" +
-                         device_id + "_status\","
-                                     "\"state_topic\":\"" +
-                         MQTT_TOPIC_STATUS + "\","
-                                             "\"value_template\":\"{{ value_json.status }}\","
-                                             "\"icon\":\"mdi:clock-digital\"," +
-                         device_info + "}";
-
-  mqttClient.publish("homeassistant/sensor/mqtt_clock/status/config", status_config.c_str(), true);
+  publishDiscovery("sensor", "status",
+                   "\"name\":\"Clock Status\","
+                   "\"unique_id\":\"" +
+                       id + "_status\","
+                            "\"state_topic\":\"" +
+                       MQTT_TOPIC_STATUS + "\","
+                                           "\"value_template\":\"{{ value_json.status }}\","
+                                           "\"icon\":\"mdi:clock-digital\"");
 
   // 2. Day/Night Mode Sensor
-  String daynight_config = "{"
-                           "\"name\":\"Day/Night Mode\","
-                           "\"unique_id\":\"" +
-                           device_id + "_daynight\","
-                                       "\"state_topic\":\"" +
-                           MQTT_TOPIC_STATUS + "\","
-                                               "\"value_template\":\"{% if value_json.is_day_time %}Day{% else %}Night{% endif %}\","
-                                               "\"icon\":\"mdi:weather-sunny\"," +
-                           device_info + "}";
-
-  mqttClient.publish("homeassistant/sensor/mqtt_clock/daynight/config", daynight_config.c_str(), true);
+  publishDiscovery("sensor", "daynight",
+                   "\"name\":\"Day/Night Mode\","
+                   "\"unique_id\":\"" +
+                       id + "_daynight\","
+                            "\"state_topic\":\"" +
+                       MQTT_TOPIC_STATUS + "\","
+                                           "\"value_template\":\"{% if value_json.is_day_time %}Day{% else %}Night{% endif %}\","
+                                           "\"icon\":\"mdi:weather-sunny\"");
 
   // 3. Day Brightness Number Control
-  String day_brightness_config = "{"
-                                 "\"name\":\"Day Brightness\","
-                                 "\"unique_id\":\"" +
-                                 device_id + "_day_brightness\","
-                                             "\"state_topic\":\"" +
-                                 MQTT_TOPIC_STATUS + "\","
-                                                     "\"command_topic\":\"" +
-                                 MQTT_TOPIC_BRIGHTNESS_DAY + "\","
-                                                             "\"value_template\":\"{{ value_json.day_brightness }}\","
-                                                             "\"min\":0,\"max\":15,\"step\":1,"
-                                                             "\"icon\":\"mdi:brightness-6\"," +
-                                 device_info + "}";
-
-  mqttClient.publish("homeassistant/number/mqtt_clock/day_brightness/config", day_brightness_config.c_str(), true);
+  publishDiscovery("number", "day_brightness",
+                   "\"name\":\"Day Brightness\","
+                   "\"unique_id\":\"" +
+                       id + "_day_brightness\","
+                            "\"state_topic\":\"" +
+                       MQTT_TOPIC_STATUS + "\","
+                                           "\"command_topic\":\"" +
+                       MQTT_TOPIC_BRIGHTNESS_DAY + "\","
+                                                   "\"value_template\":\"{{ value_json.day_brightness }}\","
+                                                   "\"min\":0,\"max\":15,\"step\":1,"
+                                                   "\"icon\":\"mdi:brightness-6\"");
 
   // 4. Night Brightness Number Control
-  String night_brightness_config = "{"
-                                   "\"name\":\"Night Brightness\","
-                                   "\"unique_id\":\"" +
-                                   device_id + "_night_brightness\","
-                                               "\"state_topic\":\"" +
-                                   MQTT_TOPIC_STATUS + "\","
-                                                       "\"command_topic\":\"" +
-                                   MQTT_TOPIC_BRIGHTNESS_NIGHT + "\","
-                                                                 "\"value_template\":\"{{ value_json.night_brightness }}\","
-                                                                 "\"min\":0,\"max\":15,\"step\":1,"
-                                                                 "\"icon\":\"mdi:brightness-3\"," +
-                                   device_info + "}";
-
-  mqttClient.publish("homeassistant/number/mqtt_clock/night_brightness/config", night_brightness_config.c_str(), true);
+  publishDiscovery("number", "night_brightness",
+                   "\"name\":\"Night Brightness\","
+                   "\"unique_id\":\"" +
+                       id + "_night_brightness\","
+                            "\"state_topic\":\"" +
+                       MQTT_TOPIC_STATUS + "\","
+                                           "\"command_topic\":\"" +
+                       MQTT_TOPIC_BRIGHTNESS_NIGHT + "\","
+                                                     "\"value_template\":\"{{ value_json.night_brightness }}\","
+                                                     "\"min\":0,\"max\":15,\"step\":1,"
+                                                     "\"icon\":\"mdi:brightness-3\"");
 
   // 5. Notification Text Input. The json_attributes_topic surfaces the usage
   // docs (schema + examples) as entity attributes inside Home Assistant.
-  String notification_config = "{"
-                               "\"name\":\"Send Notification\","
-                               "\"unique_id\":\"" +
-                               device_id + "_notification\","
-                                           "\"command_topic\":\"" +
-                               MQTT_TOPIC_NOTIFICATION + "\","
-                                                         "\"json_attributes_topic\":\"" +
-                               MQTT_TOPIC_NOTIFICATION_HELP + "\","
-                                                              "\"icon\":\"mdi:message-text\"," +
-                               device_info + "}";
-
-  mqttClient.publish("homeassistant/text/mqtt_clock/notification/config", notification_config.c_str(), true);
+  publishDiscovery("text", "notification",
+                   "\"name\":\"Send Notification\","
+                   "\"unique_id\":\"" +
+                       id + "_notification\","
+                            "\"command_topic\":\"" +
+                       MQTT_TOPIC_NOTIFICATION + "\","
+                                                 "\"json_attributes_topic\":\"" +
+                       MQTT_TOPIC_NOTIFICATION_HELP + "\","
+                                                      "\"icon\":\"mdi:message-text\"");
 
   // Publish the usage docs (retained) so they appear under the notification
   // entity's Attributes in Home Assistant.
   publishNotificationHelp();
 
   // 6. Animation Select (dropdown: heart / wave / pulse)
-  String animation_config = "{"
-                            "\"name\":\"Animation\","
-                            "\"unique_id\":\"" +
-                            device_id + "_animation\","
-                                        "\"command_topic\":\"" +
-                            MQTT_TOPIC_ANIMATION + "\","
-                                                   "\"options\":[\"heart\",\"wave\",\"pulse\"],"
-                                                   "\"icon\":\"mdi:animation-play\"," +
-                            device_info + "}";
-
-  mqttClient.publish("homeassistant/select/mqtt_clock/animation/config", animation_config.c_str(), true);
+  publishDiscovery("select", "animation",
+                   "\"name\":\"Animation\","
+                   "\"unique_id\":\"" +
+                       id + "_animation\","
+                            "\"command_topic\":\"" +
+                       MQTT_TOPIC_ANIMATION + "\","
+                                              "\"options\":[\"heart\",\"wave\",\"pulse\"],"
+                                              "\"icon\":\"mdi:animation-play\"");
 
   // Remove the previous hour-only "number" entities (superseded by the time
   // entities below). Publishing an empty retained payload deletes a stale
@@ -294,34 +307,28 @@ void MQTTManager::sendDiscoveryConfig()
   mqttClient.publish("homeassistant/number/mqtt_clock/night_start/config", "", true);
 
   // 7. Day Start Time (HH:MM). A Sun-based HA automation can write to this.
-  String day_start_config = "{"
-                            "\"name\":\"Day Start Time\","
-                            "\"unique_id\":\"" +
-                            device_id + "_day_start_time\","
-                                        "\"state_topic\":\"" +
-                            MQTT_TOPIC_STATUS + "\","
-                                                "\"command_topic\":\"" +
-                            MQTT_TOPIC_SCHEDULE_DAY_START + "\","
-                                                           "\"value_template\":\"{{ value_json.day_start }}\","
-                                                           "\"icon\":\"mdi:weather-sunset-up\"," +
-                            device_info + "}";
-
-  mqttClient.publish("homeassistant/time/mqtt_clock/day_start/config", day_start_config.c_str(), true);
+  publishDiscovery("time", "day_start",
+                   "\"name\":\"Day Start Time\","
+                   "\"unique_id\":\"" +
+                       id + "_day_start_time\","
+                            "\"state_topic\":\"" +
+                       MQTT_TOPIC_STATUS + "\","
+                                           "\"command_topic\":\"" +
+                       MQTT_TOPIC_SCHEDULE_DAY_START + "\","
+                                                      "\"value_template\":\"{{ value_json.day_start }}\","
+                                                      "\"icon\":\"mdi:weather-sunset-up\"");
 
   // 8. Night Start Time (HH:MM). A Sun-based HA automation can write to this.
-  String night_start_config = "{"
-                              "\"name\":\"Night Start Time\","
-                              "\"unique_id\":\"" +
-                              device_id + "_night_start_time\","
-                                          "\"state_topic\":\"" +
-                              MQTT_TOPIC_STATUS + "\","
-                                                  "\"command_topic\":\"" +
-                              MQTT_TOPIC_SCHEDULE_NIGHT_START + "\","
-                                                               "\"value_template\":\"{{ value_json.night_start }}\","
-                                                               "\"icon\":\"mdi:weather-sunset-down\"," +
-                              device_info + "}";
-
-  mqttClient.publish("homeassistant/time/mqtt_clock/night_start/config", night_start_config.c_str(), true);
+  publishDiscovery("time", "night_start",
+                   "\"name\":\"Night Start Time\","
+                   "\"unique_id\":\"" +
+                       id + "_night_start_time\","
+                            "\"state_topic\":\"" +
+                       MQTT_TOPIC_STATUS + "\","
+                                           "\"command_topic\":\"" +
+                       MQTT_TOPIC_SCHEDULE_NIGHT_START + "\","
+                                                        "\"value_template\":\"{{ value_json.night_start }}\","
+                                                        "\"icon\":\"mdi:weather-sunset-down\"");
 }
 
 void MQTTManager::publishNotificationHelp()
@@ -340,9 +347,10 @@ void MQTTManager::publishNotificationHelp()
                 "\"speed\":\"int 5-100 ms, default 35; lower = faster\","
                 "\"repeat\":\"int 1-10, default 1\","
                 "\"brightness\":\"int 0-15 or -1, default -1 (keep current)\","
-                "\"flash\":\"bool, default false (static only)\","
-                "\"flash_count\":\"int 1-10, default 3\","
-                "\"example\":\"{\\\"message\\\":\\\"Dinner!\\\",\\\"speed\\\":15,\\\"repeat\\\":2}\","
+                "\"duration\":\"int 1-30 s, default 3; static hold time\","
+                "\"flash\":\"bool, default false; quick fade out/in before holding (static only)\","
+                "\"flash_count\":\"int 1-10, default 2; number of fade pulses\","
+                "\"example\":\"{\\\"message\\\":\\\"Dinner!\\\",\\\"scrolling\\\":false,\\\"flash\\\":true}\","
                 "\"animation\":\"publish heart|wave|pulse to " +
                 MQTT_TOPIC_ANIMATION + "\""
                                        "}";
@@ -497,10 +505,21 @@ int MQTTManager::parseTimeStringToMinutes(const String &value)
   return parsedHour * 60 + parsedMinute;
 }
 
+int MQTTManager::currentAutoBrightness()
+{
+  // Before the first successful time sync, hour()/minute() read 00:00, which
+  // would wrongly select night mode and blank the display. Until we actually
+  // know the time, use the (brighter, always-visible) day brightness.
+  if (!timeManager.isTimeSynced())
+  {
+    return dayBrightness;
+  }
+  return isDayTime() ? dayBrightness : nightBrightness;
+}
+
 void MQTTManager::updateBrightnessBasedOnTime()
 {
-  int targetBrightness = isDayTime() ? dayBrightness : nightBrightness;
-  display.setIntensity(targetBrightness);
+  display.setIntensity(currentAutoBrightness());
 }
 
 bool MQTTManager::isDayTime()
@@ -621,7 +640,7 @@ void MQTTManager::showAdvancedNotification(const NotificationConfig &config)
     {
       display.scrollMessage(config.message, config.scrollSpeed);
       if (i < config.scrollRepeat - 1)
-        delay(500); // Brief pause between repeats
+        serviceDelay(500); // Brief pause between repeats
     }
 
     showingNotification = false;
@@ -629,23 +648,28 @@ void MQTTManager::showAdvancedNotification(const NotificationConfig &config)
   }
   else
   {
-    // Static notification
+    // Static notification. The brightness to settle at once done.
+    int holdBrightness = (config.brightness >= 0) ? config.brightness : currentAutoBrightness();
+
+    // Draw the message once; the fade only modulates panel intensity, so the
+    // text stays on screen throughout.
     display.fillScreen(LOW);
     display.centerPrint(config.message);
+    display.setIntensity(holdBrightness);
 
+    // Optionally fade the message out and back in a few times to grab
+    // attention, then hold it steady for the configured duration.
     if (config.flashEffect)
     {
-      Serial.println("Performing brightness animation " + String(config.flashCount) + " times");
       for (int i = 0; i < config.flashCount; i++)
       {
-        display.performBrightnessAnimation();
+        display.fadeMessage(holdBrightness, NOTIFICATION_FADE_STEP_MS);
       }
     }
-    else
-    {
-      // No flash effect - show message for 3 seconds
-      delay(3000);
-    }
+
+    // Hold the message steady at the set brightness.
+    display.setIntensity(holdBrightness);
+    serviceDelay((unsigned long)config.holdSeconds * 1000UL);
 
     // Static notification is done, return to clock
     showingNotification = false;
@@ -676,7 +700,8 @@ void MQTTManager::parseNotificationJson(const String &jsonString)
   config.scrollSpeed = constrain(doc["speed"] | 35, 5, 100);
   config.brightness = constrain(doc["brightness"] | -1, -1, 15);
   config.flashEffect = doc["flash"] | false;
-  config.flashCount = constrain(doc["flash_count"] | 3, 1, 10);
+  config.flashCount = constrain(doc["flash_count"] | 2, 1, 10);
+  config.holdSeconds = constrain(doc["duration"] | 3, 1, 30);
   config.isSimpleMessage = false;
 
   queueNotification(config);
@@ -742,7 +767,7 @@ void MQTTManager::playAnimation(const String &animationType)
       matrix.drawPixel(17, 5, HIGH);
       matrix.drawPixel(16, 6, HIGH);
       display.write();
-      delay(500);
+      serviceDelay(500);
 
       // Large heart
       display.fillScreen(LOW);
@@ -765,7 +790,7 @@ void MQTTManager::playAnimation(const String &animationType)
       matrix.drawPixel(17, 6, HIGH);
       matrix.drawPixel(16, 7, HIGH);
       display.write();
-      delay(500);
+      serviceDelay(500);
     }
   }
   else if (animationType == "wave")
@@ -784,7 +809,7 @@ void MQTTManager::playAnimation(const String &animationType)
         }
       }
       display.write();
-      delay(80);
+      serviceDelay(80);
     }
   }
   else if (animationType == "pulse")
@@ -810,7 +835,7 @@ void MQTTManager::playAnimation(const String &animationType)
         }
       }
       display.write();
-      delay(200);
+      serviceDelay(200);
     }
 
     // Contract back to center
@@ -829,7 +854,7 @@ void MQTTManager::playAnimation(const String &animationType)
         }
       }
       display.write();
-      delay(200);
+      serviceDelay(200);
     }
   }
   else
@@ -838,9 +863,9 @@ void MQTTManager::playAnimation(const String &animationType)
     for (int i = 0; i < 3; i++)
     {
       display.fillScreen(HIGH);
-      delay(200);
+      serviceDelay(200);
       display.fillScreen(LOW);
-      delay(200);
+      serviceDelay(200);
     }
   }
 
