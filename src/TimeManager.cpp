@@ -4,7 +4,7 @@
 
 TimeManager::TimeManager(TimeDB &timeDBRef, DisplayManager &displayRef)
     : timeDB(timeDBRef), display(displayRef), lastMinute("xx"), lastEpoch(0), firstEpoch(0),
-      timeoutCount(0), timeSynced(false), lastSyncAttemptMs(0)
+      timeSynced(false), lastSyncAttemptMs(0)
 {
 }
 

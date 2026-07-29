@@ -15,8 +15,7 @@ void WiFiSetup::initialize()
   WiFiManager wifiManager;
   wifiManager.setAPCallback(configModeCallback);
 
-  String hostname = "Zegar TV";
-  if (!wifiManager.autoConnect(hostname.c_str()))
+  if (!wifiManager.autoConnect(WIFI_PORTAL_AP_NAME.c_str()))
   {
     Serial.println("Failed to connect to WiFi, restarting...");
     delay(3000);
