@@ -32,15 +32,11 @@ class TimeDB
 public:
   TimeDB(String apiKey);
   time_t getTime();
-  String getDayName();
-  String getMonthName();
-  String getAmPm();
   String zeroPad(int number);
 
 private:
   const char *servername = "api.timezonedb.com";
   String apiKey;
-  long localMillisAtUpdate;
 
   // Constants
   static const int INVALID_TIME = 20;

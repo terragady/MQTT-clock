@@ -118,10 +118,20 @@ String WebOTAManager::getIndexHTML()
 
         <div class="card">
             <h3>📋 MQTT Topics</h3>
-            <p><strong>Notifications:</strong> <code>clock/zegarTV/notification</code></p>
-            <p><strong>Day Brightness:</strong> <code>clock/zegarTV/brightness/day</code></p>
-            <p><strong>Night Brightness:</strong> <code>clock/zegarTV/brightness/night</code></p>
-            <p><strong>Status:</strong> <code>clock/zegarTV/status</code></p>
+            <p><strong>Notifications:</strong> <code>)" +
+                MQTT_TOPIC_NOTIFICATION + R"(</code></p>
+            <p><strong>Animation:</strong> <code>)" +
+                MQTT_TOPIC_ANIMATION + R"(</code></p>
+            <p><strong>Day Brightness:</strong> <code>)" +
+                MQTT_TOPIC_BRIGHTNESS_DAY + R"(</code></p>
+            <p><strong>Night Brightness:</strong> <code>)" +
+                MQTT_TOPIC_BRIGHTNESS_NIGHT + R"(</code></p>
+            <p><strong>Day Start:</strong> <code>)" +
+                MQTT_TOPIC_SCHEDULE_DAY_START + R"(</code></p>
+            <p><strong>Night Start:</strong> <code>)" +
+                MQTT_TOPIC_SCHEDULE_NIGHT_START + R"(</code></p>
+            <p><strong>Status:</strong> <code>)" +
+                MQTT_TOPIC_STATUS + R"(</code></p>
         </div>
     </div>
 </body>

@@ -16,18 +16,19 @@ struct NotificationConfig
   int scrollRepeat = 1;         // how many times to scroll (1-10)
   int scrollSpeed = 35;         // scroll speed in ms (5-100)
   int brightness = -1;          // notification brightness (-1 = use current, 0-15)
-  bool flashEffect = false;     // flash brightness effect (only for static)
-  int flashCount = 3;           // number of flashes (1-10)
+  bool flashEffect = false;     // quick fade out/in before holding (static messages only)
+  int flashCount = 2;           // number of fade pulses (1-10)
+  int holdSeconds = 3;          // how long static text stays on screen (1-30 s)
   bool isSimpleMessage = false; // true if this is a simple string message
 };
 
 // Timing constants
 const unsigned long MQTT_RECONNECT_INTERVAL = 5000; // Time between reconnect attempts (ms)
-const int MQTT_MAX_RECONNECT_ATTEMPTS = 3;          // Max attempts before yielding to loop
 const int MQTT_BUFFER_SIZE = 1024;                  // MQTT buffer size for discovery messages
 const int MQTT_CONNECT_TIMEOUT_MS = 3000;           // Max blocking time for TCP connect (ms)
 const uint16_t MQTT_SOCKET_TIMEOUT_S = 3;           // Max blocking time for MQTT handshake/reads (s)
 const unsigned long MQTT_STATUS_PUBLISH_INTERVAL = 60000UL; // Periodic status refresh (ms)
+const int NOTIFICATION_FADE_STEP_MS = 25;                   // Per-step delay of the static-notification fade pulse (ms)
 
 class MQTTManager
 {
@@ -37,6 +38,7 @@ public:
   // MQTT operations
   void initialize();
   void loop();
+  void keepAlive(); // Pump the MQTT client only (safe to call mid-display)
   bool tryReconnect(); // Non-blocking reconnect attempt
   bool isConnected();
   bool isFilesystemAvailable() const { return filesystemAvailable; }
@@ -52,6 +54,7 @@ public:
   void setDayStartMinutes(int minutes);
   void setNightStartMinutes(int minutes);
   void updateBrightnessBasedOnTime();
+  int currentAutoBrightness(); // Day or night brightness for the current time
 
   // Getters for current settings
   int getDayBrightness() const { return dayBrightness; }
@@ -78,6 +81,13 @@ private:
   bool showingNotification;
   std::queue<NotificationConfig> notificationQueue;
   NotificationConfig currentConfig;
+
+  // Discovery helpers
+  String getDeviceId();     // Stable per-device id derived from the MAC
+  String buildDeviceInfo(); // Shared "device" JSON block for every entity
+  // Publish one retained discovery config. `fields` is the entity-specific JSON
+  // body (no braces); this wraps it with the shared device block and topic.
+  void publishDiscovery(const String &component, const String &objectId, const String &fields);
 
   // Helper functions
   static void mqttCallback(char *topic, byte *payload, unsigned int length);

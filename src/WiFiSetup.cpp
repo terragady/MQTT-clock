@@ -21,8 +21,7 @@ void WiFiSetup::initialize()
   // Kept long (10 min) so an in-progress manual setup isn't cut short.
   wifiManager.setConfigPortalTimeout(WIFI_CONFIG_PORTAL_TIMEOUT_SECONDS);
 
-  String hostname = "Zegar TV";
-  if (!wifiManager.autoConnect(hostname.c_str()))
+  if (!wifiManager.autoConnect(WIFI_PORTAL_AP_NAME.c_str()))
   {
     Serial.println("Config portal timed out, rebooting to retry WiFi...");
     delay(3000);

@@ -12,6 +12,10 @@ public:
   void scrollMessage(const String &msg);
   void scrollMessage(const String &msg, int speed); // Overloaded version with custom speed
   void centerPrint(const String &msg);
+  // Fade the currently displayed content out (to 0) and back in (to
+  // targetBrightness), stepDelayMs per intensity step. The content is not
+  // redrawn, only the panel intensity is modulated.
+  void fadeMessage(int targetBrightness, int stepDelayMs);
   void performBrightnessAnimation();
   void showUpdateIndicator();
   void initializeMatrix();

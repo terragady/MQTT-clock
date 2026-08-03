@@ -117,14 +117,19 @@ Publish to `clock/zegarTV/notification`.
 | `speed` | int 5–100 | `35` | ms per step; lower = faster |
 | `repeat` | int 1–10 | `1` | scroll repeats |
 | `brightness` | int 0–15 or `-1` | `-1` | `-1` = keep current |
-| `flash` | bool | `false` | static messages only |
-| `flash_count` | int 1–10 | `3` | flashes when `flash` is true |
+| `duration` | int 1–30 | `3` | static hold time (seconds) |
+| `flash` | bool | `false` | quick fade out/in before holding (static only) |
+| `flash_count` | int 1–10 | `2` | number of fade pulses when `flash` is true |
+
+For a static message, the text optionally fades out and back in `flash_count`
+times to grab attention, then holds steady at the set brightness for `duration`
+seconds.
 
 Examples:
 
 ```json
 {"message": "Dinner!", "speed": 15, "repeat": 2}
-{"message": "ALERT", "scrolling": false, "flash": true, "flash_count": 5, "brightness": 15}
+{"message": "ALERT", "scrolling": false, "flash": true, "duration": 5, "brightness": 15}
 ```
 
 Text is UTF-8 and mapped to the display's CP437 font. The degree sign `°` is

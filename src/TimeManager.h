@@ -37,7 +37,6 @@ private:
   String lastMinute;
   long lastEpoch;
   long firstEpoch;
-  int timeoutCount;
 
   // Sync state
   bool timeSynced;                  // true once we have a valid time at least once
