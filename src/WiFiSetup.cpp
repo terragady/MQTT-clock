@@ -15,12 +15,17 @@ void WiFiSetup::initialize()
   WiFiManager wifiManager;
   wifiManager.setAPCallback(configModeCallback);
 
+  // Give the config portal a generous timeout so a transient router outage
+  // doesn't trap the device on the "WiFi" portal screen forever. When it
+  // expires, autoConnect() returns false and we reboot to retry the router.
+  // Kept long (10 min) so an in-progress manual setup isn't cut short.
+  wifiManager.setConfigPortalTimeout(WIFI_CONFIG_PORTAL_TIMEOUT_SECONDS);
+
   String hostname = "Zegar TV";
   if (!wifiManager.autoConnect(hostname.c_str()))
   {
-    Serial.println("Failed to connect to WiFi, restarting...");
+    Serial.println("Config portal timed out, rebooting to retry WiFi...");
     delay(3000);
-    WiFi.disconnect(true);
     ESP.reset();
     delay(5000);
   }
