@@ -19,8 +19,8 @@ const int DISPLAY_SCROLL_SPEED = 35;         // In milliseconds (slow = 35, norm
 const bool FLASH_ON_SECONDS = true;          // when true the : character in the time will flash on and off as a seconds indicator
 
 // API Configuration
-const String TIMEZONE_DB_API_KEY = SECRET_TIMEZONE_DB_API_KEY;
-const String TIMEZONE = "Europe/Oslo";
+constexpr const char *TIMEZONE_DB_API_KEY =SECRET_TIMEZONE_DB_API_KEY;
+constexpr const char *TIMEZONE = "Europe/Oslo";
 // Display Hardware Settings
 // CLK -> D5 (SCK)
 // CS  -> D6
@@ -39,31 +39,45 @@ const int NUMBER_OF_VERTICAL_DISPLAYS = 1;   // default 1 for a single row heigh
 const int LED_ROTATION = 3;
 
 // Network Settings
-const String DEVICE_HOSTNAME = "ZegarTV";
+//
+// These are plain string literals rather than String objects on purpose. A
+// namespace-scope `const String` has internal linkage, so every translation
+// unit that includes this header gets its own copy, each with a constructor
+// that runs before setup() and a heap allocation that is never freed. A
+// `constexpr const char *` lives in flash and costs nothing at boot.
+constexpr const char *DEVICE_HOSTNAME = "ZegarTV";
 // SSID of the WiFiManager configuration portal shown on first boot / when it
 // cannot join a known network.
-const String WIFI_PORTAL_AP_NAME = "Zegar TV";
+constexpr const char *WIFI_PORTAL_AP_NAME = "Zegar TV";
 
 // MQTT Settings
 // Use the broker's IP rather than a bare hostname: the ESP8266's DNS resolver
 // often can't resolve names like "homeassistant" (that relies on mDNS).
 // Tip: give Home Assistant a DHCP reservation so this IP stays stable.
-const String MQTT_SERVER = "192.168.50.42"; // Home Assistant broker IP
+constexpr const char *MQTT_SERVER = "192.168.50.42"; // Home Assistant broker IP
 const int MQTT_PORT = 1883;
-const String MQTT_USER = SECRET_MQTT_USER;
-const String MQTT_PASSWORD = SECRET_MQTT_PASSWORD;
-const String MQTT_CLIENT_ID = "mqtt-clock";
-const String MQTT_TOPIC_PREFIX = "clock/zegarTV";
+constexpr const char *MQTT_USER =SECRET_MQTT_USER;
+constexpr const char *MQTT_PASSWORD =SECRET_MQTT_PASSWORD;
+constexpr const char *MQTT_CLIENT_ID = "mqtt-clock";
 
 // MQTT Topics
-const String MQTT_TOPIC_NOTIFICATION = MQTT_TOPIC_PREFIX + "/notification";
-const String MQTT_TOPIC_NOTIFICATION_HELP = MQTT_TOPIC_PREFIX + "/notification/help"; // Retained usage docs (HA attributes)
-const String MQTT_TOPIC_ANIMATION = MQTT_TOPIC_PREFIX + "/animation";
-const String MQTT_TOPIC_BRIGHTNESS_DAY = MQTT_TOPIC_PREFIX + "/brightness/day";
-const String MQTT_TOPIC_BRIGHTNESS_NIGHT = MQTT_TOPIC_PREFIX + "/brightness/night";
-const String MQTT_TOPIC_SCHEDULE_DAY_START = MQTT_TOPIC_PREFIX + "/schedule/day_start";
-const String MQTT_TOPIC_SCHEDULE_NIGHT_START = MQTT_TOPIC_PREFIX + "/schedule/night_start";
-const String MQTT_TOPIC_STATUS = MQTT_TOPIC_PREFIX + "/status";
+//
+// The prefix is a macro so the topics below are assembled by adjacent-literal
+// concatenation at compile time. Previously each topic was a String built at
+// boot by concatenating the prefix, which meant nine heap allocations and nine
+// constructors per translation unit before setup() ever ran.
+#define MQTT_TOPIC_PREFIX_LITERAL "clock/zegarTV"
+constexpr const char *MQTT_TOPIC_PREFIX = MQTT_TOPIC_PREFIX_LITERAL;
+
+constexpr const char *MQTT_TOPIC_NOTIFICATION = MQTT_TOPIC_PREFIX_LITERAL "/notification";
+constexpr const char *MQTT_TOPIC_NOTIFICATION_HELP = MQTT_TOPIC_PREFIX_LITERAL "/notification/help"; // Retained usage docs (HA attributes)
+constexpr const char *MQTT_TOPIC_ANIMATION = MQTT_TOPIC_PREFIX_LITERAL "/animation";
+constexpr const char *MQTT_TOPIC_BRIGHTNESS_DAY = MQTT_TOPIC_PREFIX_LITERAL "/brightness/day";
+constexpr const char *MQTT_TOPIC_BRIGHTNESS_NIGHT = MQTT_TOPIC_PREFIX_LITERAL "/brightness/night";
+constexpr const char *MQTT_TOPIC_SCHEDULE_DAY_START = MQTT_TOPIC_PREFIX_LITERAL "/schedule/day_start";
+constexpr const char *MQTT_TOPIC_SCHEDULE_NIGHT_START = MQTT_TOPIC_PREFIX_LITERAL "/schedule/night_start";
+constexpr const char *MQTT_TOPIC_STATUS = MQTT_TOPIC_PREFIX_LITERAL "/status";
+constexpr const char *MQTT_TOPIC_DISCOVERY = MQTT_TOPIC_PREFIX_LITERAL "/discovery"; // Any payload re-sends discovery
 
 // Brightness Settings
 const int DEFAULT_DAY_BRIGHTNESS = 8;   // Default day brightness (0-15)

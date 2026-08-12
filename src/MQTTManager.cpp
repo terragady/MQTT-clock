@@ -45,7 +45,7 @@ void MQTTManager::initialize()
   // cannot stall the main loop.
   wifiClient.setTimeout(MQTT_CONNECT_TIMEOUT_MS);
 
-  mqttClient.setServer(MQTT_SERVER.c_str(), MQTT_PORT);
+  mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
   mqttClient.setCallback(mqttCallback);
   mqttClient.setBufferSize(MQTT_BUFFER_SIZE);
   mqttClient.setSocketTimeout(MQTT_SOCKET_TIMEOUT_S); // cap MQTT handshake/read wait
@@ -120,22 +120,22 @@ bool MQTTManager::tryReconnect()
   Serial.print(reconnectAttempts);
   Serial.print(")...");
 
-  String clientId = MQTT_CLIENT_ID + "-" + String(random(0xffff), HEX);
+  String clientId = String(MQTT_CLIENT_ID) + "-" + String(random(0xffff), HEX);
 
   // When no username is configured, connect anonymously: we must NOT send
   // credentials at all. Sending an empty/incorrect username makes a broker
   // that allows anonymous access reject us with "not authorised".
   const String willMessage = "{\"status\":\"offline\"}";
   bool connected;
-  if (MQTT_USER.length() == 0)
+  if (MQTT_USER[0] == '\0')
   {
     connected = mqttClient.connect(clientId.c_str(),
-                                   MQTT_TOPIC_STATUS.c_str(), 0, true, willMessage.c_str());
+                                   MQTT_TOPIC_STATUS, 0, true, willMessage.c_str());
   }
   else
   {
-    connected = mqttClient.connect(clientId.c_str(), MQTT_USER.c_str(), MQTT_PASSWORD.c_str(),
-                                   MQTT_TOPIC_STATUS.c_str(), 0, true, willMessage.c_str());
+    connected = mqttClient.connect(clientId.c_str(), MQTT_USER, MQTT_PASSWORD,
+                                   MQTT_TOPIC_STATUS, 0, true, willMessage.c_str());
   }
 
   if (connected)
@@ -144,13 +144,13 @@ bool MQTTManager::tryReconnect()
     reconnectAttempts = 0;
 
     // Subscribe to topics
-    mqttClient.subscribe(MQTT_TOPIC_NOTIFICATION.c_str());
-    mqttClient.subscribe(MQTT_TOPIC_ANIMATION.c_str());
-    mqttClient.subscribe(MQTT_TOPIC_BRIGHTNESS_DAY.c_str());
-    mqttClient.subscribe(MQTT_TOPIC_BRIGHTNESS_NIGHT.c_str());
-    mqttClient.subscribe(MQTT_TOPIC_SCHEDULE_DAY_START.c_str());
-    mqttClient.subscribe(MQTT_TOPIC_SCHEDULE_NIGHT_START.c_str());
-    mqttClient.subscribe((MQTT_TOPIC_PREFIX + "/discovery").c_str());
+    mqttClient.subscribe(MQTT_TOPIC_NOTIFICATION);
+    mqttClient.subscribe(MQTT_TOPIC_ANIMATION);
+    mqttClient.subscribe(MQTT_TOPIC_BRIGHTNESS_DAY);
+    mqttClient.subscribe(MQTT_TOPIC_BRIGHTNESS_NIGHT);
+    mqttClient.subscribe(MQTT_TOPIC_SCHEDULE_DAY_START);
+    mqttClient.subscribe(MQTT_TOPIC_SCHEDULE_NIGHT_START);
+    mqttClient.subscribe(MQTT_TOPIC_DISCOVERY);
 
     // Send discovery config and status
     sendDiscoveryConfig();
@@ -184,7 +184,7 @@ void MQTTManager::sendStatus(const String &status)
     payload += "\"is_day_time\":" + String(isDayTime() ? "true" : "false");
     payload += "}";
 
-    mqttClient.publish(MQTT_TOPIC_STATUS.c_str(), payload.c_str(), true); // Retained status
+    mqttClient.publish(MQTT_TOPIC_STATUS, payload.c_str(), true); // Retained status
     lastStatusPublish = millis();
   }
 }
@@ -340,22 +340,26 @@ void MQTTManager::publishNotificationHelp()
 
   // Each key becomes an attribute on the "Send Notification" entity in HA.
   // Keep this compact so the whole packet stays within MQTT_BUFFER_SIZE.
-  String help = "{"
-                "\"usage\":\"Publish plain text (scrolls once) or a JSON object\","
-                "\"message\":\"string, required\","
-                "\"scrolling\":\"bool, default true; false = static/centered\","
-                "\"speed\":\"int 5-100 ms, default 35; lower = faster\","
-                "\"repeat\":\"int 1-10, default 1\","
-                "\"brightness\":\"int 0-15 or -1, default -1 (keep current)\","
-                "\"duration\":\"int 1-30 s, default 3; static hold time\","
-                "\"flash\":\"bool, default false; quick fade out/in before holding (static only)\","
-                "\"flash_count\":\"int 1-10, default 2; number of fade pulses\","
-                "\"example\":\"{\\\"message\\\":\\\"Dinner!\\\",\\\"scrolling\\\":false,\\\"flash\\\":true}\","
-                "\"animation\":\"publish heart|wave|pulse to " +
-                MQTT_TOPIC_ANIMATION + "\""
-                                       "}";
+  // One string literal, assembled by the compiler. The topic name is spliced in
+  // via the prefix macro, so this costs no heap and no runtime concatenation.
+  static const char help[] PROGMEM =
+      "{"
+      "\"usage\":\"Publish plain text (scrolls once) or a JSON object\","
+      "\"message\":\"string, required\","
+      "\"scrolling\":\"bool, default true; false = static/centered\","
+      "\"speed\":\"int 5-100 ms, default 35; lower = faster\","
+      "\"repeat\":\"int 1-10, default 1\","
+      "\"brightness\":\"int 0-15 or -1, default -1 (keep current)\","
+      "\"duration\":\"int 1-30 s, default 3; static hold time\","
+      "\"flash\":\"bool, default false; quick fade out/in before holding (static only)\","
+      "\"flash_count\":\"int 1-10, default 2; number of fade pulses\","
+      "\"example\":\"{\\\"message\\\":\\\"Dinner!\\\",\\\"scrolling\\\":false,\\\"flash\\\":true}\","
+      "\"animation\":\"publish heart|wave|pulse to " MQTT_TOPIC_PREFIX_LITERAL "/animation\""
+      "}";
 
-  mqttClient.publish(MQTT_TOPIC_NOTIFICATION_HELP.c_str(), help.c_str(), true);
+  // Copied out of flash only for the moment it takes to publish.
+  const String helpPayload = FPSTR(help);
+  mqttClient.publish(MQTT_TOPIC_NOTIFICATION_HELP, helpPayload.c_str(), true);
 }
 
 void MQTTManager::mqttCallback(char *topic, byte *payload, unsigned int length)
@@ -422,7 +426,7 @@ void MQTTManager::handleMessage(const String &topic, const String &message)
       setNightStartMinutes(minutes);
     }
   }
-  else if (topic == MQTT_TOPIC_PREFIX + "/discovery")
+  else if (topic == MQTT_TOPIC_DISCOVERY)
   {
     sendDiscoveryConfig();
   }

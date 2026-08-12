@@ -12,13 +12,13 @@ OTAManager::OTAManager(DisplayManager &displayRef) : display(displayRef)
 void OTAManager::initialize()
 {
   // Setup mDNS
-  if (MDNS.begin(DEVICE_HOSTNAME.c_str()))
+  if (MDNS.begin(DEVICE_HOSTNAME))
   {
     Serial.println("mDNS responder started");
   }
 
   // Setup OTA
-  ArduinoOTA.setHostname(DEVICE_HOSTNAME.c_str());
+  ArduinoOTA.setHostname(DEVICE_HOSTNAME);
   ArduinoOTA.setPassword("mqtt-clock-ota"); // Change this to your preferred password
 
   ArduinoOTA.onStart(onStart);
@@ -29,7 +29,7 @@ void OTAManager::initialize()
   ArduinoOTA.begin();
 
   Serial.println("OTA update ready");
-  Serial.println("Hostname: " + DEVICE_HOSTNAME);
+  Serial.println(String("Hostname: ") + DEVICE_HOSTNAME);
   Serial.println("OTA Password: mqtt-clock-ota");
 }
 
