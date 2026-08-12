@@ -89,11 +89,6 @@ bool WiFiSetup::checkConnection()
   return false;
 }
 
-bool WiFiSetup::isConnected() const
-{
-  return WiFi.status() == WL_CONNECTED;
-}
-
 void WiFiSetup::configModeCallback(WiFiManager *myWiFiManager)
 {
   Serial.println("Entered config mode");

@@ -76,14 +76,17 @@ void OTAManager::onEnd()
 
 void OTAManager::onProgress(unsigned int progress, unsigned int total)
 {
-  Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+  // The original `progress / (total / 100)` divides by zero whenever total is
+  // under 100 bytes, and integer division by zero traps on Xtensa. Scaling the
+  // other way round avoids the inner division entirely.
+  const unsigned int percent = (total == 0) ? 0 : (unsigned int)((progress * 100ULL) / total);
+
+  Serial.printf("Progress: %u%%\r", percent);
 
   if (instance)
   {
-    int percent = progress / (total / 100);
-    String progressText = String(percent) + "%";
     instance->display.fillScreen(false);
-    instance->display.centerPrint(progressText);
+    instance->display.centerPrint(String(percent) + "%");
     instance->display.write();
   }
 }
