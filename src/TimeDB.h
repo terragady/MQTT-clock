@@ -31,6 +31,12 @@ class TimeDB
 {
 public:
   TimeDB(String apiKey);
+
+  // Sentinel returned by getTime() when the time could not be fetched.
+  // Callers compare against this rather than guessing at a threshold.
+  static constexpr time_t INVALID_TIME = 0;
+
+  // Returns the current epoch time, or INVALID_TIME on any failure.
   time_t getTime();
   String zeroPad(int number);
 
@@ -39,6 +45,8 @@ private:
   String apiKey;
 
   // Constants
-  static const int INVALID_TIME = 20;
   static const int CONNECTION_TIMEOUT = 5000;
+  // Upper bound on the buffered response body, so a runaway or hostile reply
+  // cannot grow the String until the heap is exhausted.
+  static const unsigned int MAX_RESPONSE_CHARS = 1024;
 };
