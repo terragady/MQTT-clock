@@ -8,10 +8,20 @@
 #include "DisplayManager.h"
 #include "TimeManager.h"
 
-// Notification configuration structure
+// What a queued job should do once it reaches the front of the queue.
+enum class QueuedJobKind
+{
+  Notification,
+  Animation
+};
+
+// A queued display job. Everything that takes over the screen for a while goes
+// through the queue so it runs from loop(), never from inside the MQTT
+// callback (see queueNotification).
 struct NotificationConfig
 {
-  String message;
+  QueuedJobKind kind = QueuedJobKind::Notification;
+  String message;               // notification text, or the animation name when kind == Animation
   bool isScrolling = true;      // true = scroll, false = static
   int scrollRepeat = 1;         // how many times to scroll (1-10)
   int scrollSpeed = 35;         // scroll speed in ms (5-100)
@@ -30,6 +40,12 @@ const uint16_t MQTT_SOCKET_TIMEOUT_S = 3;           // Max blocking time for MQT
 const unsigned long MQTT_STATUS_PUBLISH_INTERVAL = 60000UL; // Periodic status refresh (ms)
 const int NOTIFICATION_FADE_STEP_MS = 25;                   // Per-step delay of the static-notification fade pulse (ms)
 
+// Queue limits. Each queued job owns a String, so an unbounded queue lets a
+// misbehaving publisher exhaust the heap. Capping the message length also stops
+// a single huge message from freezing the clock for minutes while it scrolls.
+const size_t MAX_NOTIFICATION_QUEUE_LENGTH = 10;
+const unsigned int MAX_NOTIFICATION_MESSAGE_CHARS = 128;
+
 class MQTTManager
 {
 public:
@@ -40,8 +56,6 @@ public:
   void loop();
   void keepAlive(); // Pump the MQTT client only (safe to call mid-display)
   bool tryReconnect(); // Non-blocking reconnect attempt
-  bool isConnected();
-  bool isFilesystemAvailable() const { return filesystemAvailable; }
 
   // Message handling
   void sendStatus(const String &status);
@@ -56,11 +70,6 @@ public:
   void updateBrightnessBasedOnTime();
   int currentAutoBrightness(); // Day or night brightness for the current time
 
-  // Getters for current settings
-  int getDayBrightness() const { return dayBrightness; }
-  int getNightBrightness() const { return nightBrightness; }
-  int getDayStartMinutes() const { return dayStartMinutes; }
-  int getNightStartMinutes() const { return nightStartMinutes; }
   bool isShowingNotification() const { return showingNotification; }
 
 private:
