@@ -33,11 +33,6 @@ void WebOTAManager::loop()
   httpServer.handleClient();
 }
 
-String WebOTAManager::getUpdateURL()
-{
-  return "http://" + WiFi.localIP().toString() + "/update";
-}
-
 void WebOTAManager::handleRoot()
 {
   httpServer.send(200, "text/html", getIndexHTML());

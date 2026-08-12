@@ -12,7 +12,6 @@ public:
     // Web OTA operations
     void initialize();
     void loop();
-    String getUpdateURL();
 
 private:
     DisplayManager &display;

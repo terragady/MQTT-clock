@@ -21,7 +21,7 @@ void WiFiSetup::initialize()
   // Kept long (10 min) so an in-progress manual setup isn't cut short.
   wifiManager.setConfigPortalTimeout(WIFI_CONFIG_PORTAL_TIMEOUT_SECONDS);
 
-  if (!wifiManager.autoConnect(WIFI_PORTAL_AP_NAME.c_str()))
+  if (!wifiManager.autoConnect(WIFI_PORTAL_AP_NAME))
   {
     Serial.println("Config portal timed out, rebooting to retry WiFi...");
     delay(3000);
@@ -87,11 +87,6 @@ bool WiFiSetup::checkConnection()
 
   Serial.println("\nReconnection failed, will retry later");
   return false;
-}
-
-bool WiFiSetup::isConnected() const
-{
-  return WiFi.status() == WL_CONNECTED;
 }
 
 void WiFiSetup::configModeCallback(WiFiManager *myWiFiManager)

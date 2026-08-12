@@ -2,9 +2,7 @@
 #include "Settings.h"
 #include "BackgroundService.h"
 
-extern int refresh; // Global refresh flag from main
-
-DisplayManager::DisplayManager(Max72xxPanel &matrixRef) : matrix(matrixRef)
+DisplayManager::DisplayManager(Max72xxPanel &matrixRef) : matrix(matrixRef), lastIntensity(-1)
 {
 }
 
@@ -18,11 +16,6 @@ void DisplayManager::scrollMessage(const String &msg, int speed)
   String scrollMsg = sanitizeText(msg) + " "; // add a space at the end
   for (int i = 0; i < (int)(CHAR_WIDTH * scrollMsg.length() + matrix.width() - 1 - SPACER); i++)
   {
-    if (refresh == 1)
-    {
-      i = 0;
-    }
-    refresh = 0;
     matrix.fillScreen(LOW);
 
     int letter = i / CHAR_WIDTH;
@@ -47,28 +40,42 @@ void DisplayManager::scrollMessage(const String &msg, int speed)
 
 void DisplayManager::centerPrint(const String &msg)
 {
-  String text = sanitizeText(msg);
+  const String text = sanitizeText(msg);
+  // Text wider than the panel would otherwise centre to a negative x and get
+  // clipped at both ends; starting at the left edge at least keeps the
+  // beginning readable. Callers that can scroll should check textFits() first.
   int x = calculateCenterX(text.length());
+  if (x < 0)
+  {
+    x = 0;
+  }
   matrix.setCursor(x, 0);
   matrix.print(text);
   matrix.write();
+}
+
+bool DisplayManager::textFits(const String &msg)
+{
+  return (int)(sanitizeText(msg).length() * CHAR_WIDTH) <= matrix.width();
 }
 
 void DisplayManager::fadeMessage(int targetBrightness, int stepDelayMs)
 {
   targetBrightness = constrain(targetBrightness, 0, 15);
 
+  // Go through setIntensity() rather than the panel directly so the cached
+  // intensity stays in step with what the hardware actually holds.
   // Fade out
   for (int level = targetBrightness; level >= 0; level--)
   {
-    matrix.setIntensity(level);
-    delay(stepDelayMs);
+    setIntensity(level);
+    serviceDelay(stepDelayMs);
   }
   // Fade back in
   for (int level = 0; level <= targetBrightness; level++)
   {
-    matrix.setIntensity(level);
-    delay(stepDelayMs);
+    setIntensity(level);
+    serviceDelay(stepDelayMs);
   }
 }
 
@@ -77,16 +84,16 @@ void DisplayManager::performBrightnessAnimation()
   // Fade in
   for (int inx = 0; inx <= 15; inx++)
   {
-    matrix.setIntensity(inx);
-    delay(50);
+    setIntensity(inx);
+    serviceDelay(50);
   }
   // Fade out
   for (int inx = 15; inx >= 0; inx--)
   {
-    matrix.setIntensity(inx);
-    delay(50);
+    setIntensity(inx);
+    serviceDelay(50);
   }
-  delay(500);
+  serviceDelay(500);
 }
 
 void DisplayManager::showUpdateIndicator()
@@ -100,7 +107,7 @@ void DisplayManager::showUpdateIndicator()
 void DisplayManager::initializeMatrix()
 {
   Serial.println("Number of LED Displays: " + String(NUMBER_OF_HORIZONTAL_DISPLAYS));
-  matrix.setIntensity(0); // Start with brightness 0
+  setIntensity(0); // Start with brightness 0
 
   // Use real CP437 mapping so high-range glyphs (e.g. the degree sign at
   // 0xF8) render correctly. Without this, Adafruit GFX shifts every byte
@@ -122,7 +129,13 @@ void DisplayManager::initializeMatrix()
 
 void DisplayManager::setIntensity(int intensity)
 {
-  matrix.setIntensity(intensity);
+  const int clamped = constrain(intensity, 0, 15);
+  if (clamped == lastIntensity)
+  {
+    return;
+  }
+  lastIntensity = clamped;
+  matrix.setIntensity(clamped);
 }
 
 void DisplayManager::fillScreen(bool state)

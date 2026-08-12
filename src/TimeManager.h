@@ -14,31 +14,23 @@ public:
 
   // Time operations
   void updateTime();
-  String getFormattedTime(bool isRefresh = false);
-  int getMinutesFromLastRefresh();
   bool shouldUpdateTime();
-  bool hasMinuteChanged();
 
-  // Time formatting helpers
-  String secondsIndicator(bool isRefresh);
-  String hourMinutes(bool isRefresh);
+  // Current time as "H:MM", or "--:--" before the first successful sync. The
+  // colon blinks once a second when FLASH_ON_SECONDS is enabled.
+  String getFormattedTime();
 
-  // Getters
-  String getLastMinute() const { return lastMinute; }
-  long getLastEpoch() const { return lastEpoch; }
-  long getFirstEpoch() const { return firstEpoch; }
   bool isTimeSynced() const { return timeSynced; }
 
 private:
   TimeDB &timeDB;
   DisplayManager &display;
 
-  // Time tracking variables
-  String lastMinute;
-  long lastEpoch;
-  long firstEpoch;
+  // Formatting helpers
+  String secondsIndicator();
+  String hourMinutes();
 
   // Sync state
-  bool timeSynced;                  // true once we have a valid time at least once
-  unsigned long lastSyncAttemptMs;  // millis() of the last sync attempt (for backoff)
+  bool timeSynced;                 // true once we have a valid time at least once
+  unsigned long lastSyncAttemptMs; // millis() of the last sync attempt (for backoff)
 };

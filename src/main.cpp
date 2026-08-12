@@ -14,9 +14,12 @@ const int LOOP_DELAY_MS = 100;                   // Main loop delay to prevent e
 const unsigned long WIFI_CHECK_INTERVAL = 30000; // Check WiFi every 30 seconds
 
 // Global variables
-int refresh = 0; // Used by DisplayManager to signal scroll refresh
 Max72xxPanel matrix = Max72xxPanel(PIN_CS, NUMBER_OF_HORIZONTAL_DISPLAYS, NUMBER_OF_VERTICAL_DISPLAYS);
 unsigned long lastWiFiCheck = 0;
+
+// Last clock string pushed to the panels, so the display is only redrawn when
+// it actually changes rather than on every loop iteration.
+String lastDisplayedTime;
 
 // Set once setup() has initialized OTA/web/MQTT. Until then serviceBackground()
 // only feeds the watchdog, so boot-time scrolls never touch an unstarted service.
@@ -129,13 +132,22 @@ void loop()
   // Only show clock if not displaying notification
   if (!mqttManager.isShowingNotification())
   {
-    // Update display when minute changes
-    timeManager.hasMinuteChanged();
-
-    // Display current time
-    String currentTime = timeManager.getFormattedTime(false);
-    displayManager.fillScreen(LOW);
-    displayManager.centerPrint(currentTime);
+    // Redraw only when the rendered string changes. With the blinking colon
+    // that is about twice a second, rather than the full-panel SPI refresh at
+    // 10 Hz this used to do on every iteration.
+    const String currentTime = timeManager.getFormattedTime();
+    if (currentTime != lastDisplayedTime)
+    {
+      lastDisplayedTime = currentTime;
+      displayManager.fillScreen(LOW);
+      displayManager.centerPrint(currentTime);
+    }
+  }
+  else
+  {
+    // A notification owns the screen. Forget what was drawn so the clock is
+    // repainted immediately once the notification finishes.
+    lastDisplayedTime = "";
   }
 
   delay(LOOP_DELAY_MS);

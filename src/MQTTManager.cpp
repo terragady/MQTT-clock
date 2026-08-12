@@ -1,6 +1,7 @@
 #include "MQTTManager.h"
 #include "Settings.h"
 #include "BackgroundService.h"
+#include "TimeOfDay.h"
 #include <TimeLib.h>
 
 // Static member initialization
@@ -45,7 +46,7 @@ void MQTTManager::initialize()
   // cannot stall the main loop.
   wifiClient.setTimeout(MQTT_CONNECT_TIMEOUT_MS);
 
-  mqttClient.setServer(MQTT_SERVER.c_str(), MQTT_PORT);
+  mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
   mqttClient.setCallback(mqttCallback);
   mqttClient.setBufferSize(MQTT_BUFFER_SIZE);
   mqttClient.setSocketTimeout(MQTT_SOCKET_TIMEOUT_S); // cap MQTT handshake/read wait
@@ -120,22 +121,27 @@ bool MQTTManager::tryReconnect()
   Serial.print(reconnectAttempts);
   Serial.print(")...");
 
-  String clientId = MQTT_CLIENT_ID + "-" + String(random(0xffff), HEX);
+  // A stable, MAC-derived client id. Generating a random id per attempt made
+  // the broker treat every reconnect as a brand-new session, so the *previous*
+  // session's Last Will could fire and publish "offline" after the new session
+  // had already published "online" - leaving Home Assistant showing the clock
+  // as unavailable while it was actually running fine.
+  const String clientId = getDeviceId();
 
   // When no username is configured, connect anonymously: we must NOT send
   // credentials at all. Sending an empty/incorrect username makes a broker
   // that allows anonymous access reject us with "not authorised".
   const String willMessage = "{\"status\":\"offline\"}";
   bool connected;
-  if (MQTT_USER.length() == 0)
+  if (MQTT_USER[0] == '\0')
   {
     connected = mqttClient.connect(clientId.c_str(),
-                                   MQTT_TOPIC_STATUS.c_str(), 0, true, willMessage.c_str());
+                                   MQTT_TOPIC_STATUS, 0, true, willMessage.c_str());
   }
   else
   {
-    connected = mqttClient.connect(clientId.c_str(), MQTT_USER.c_str(), MQTT_PASSWORD.c_str(),
-                                   MQTT_TOPIC_STATUS.c_str(), 0, true, willMessage.c_str());
+    connected = mqttClient.connect(clientId.c_str(), MQTT_USER, MQTT_PASSWORD,
+                                   MQTT_TOPIC_STATUS, 0, true, willMessage.c_str());
   }
 
   if (connected)
@@ -144,13 +150,13 @@ bool MQTTManager::tryReconnect()
     reconnectAttempts = 0;
 
     // Subscribe to topics
-    mqttClient.subscribe(MQTT_TOPIC_NOTIFICATION.c_str());
-    mqttClient.subscribe(MQTT_TOPIC_ANIMATION.c_str());
-    mqttClient.subscribe(MQTT_TOPIC_BRIGHTNESS_DAY.c_str());
-    mqttClient.subscribe(MQTT_TOPIC_BRIGHTNESS_NIGHT.c_str());
-    mqttClient.subscribe(MQTT_TOPIC_SCHEDULE_DAY_START.c_str());
-    mqttClient.subscribe(MQTT_TOPIC_SCHEDULE_NIGHT_START.c_str());
-    mqttClient.subscribe((MQTT_TOPIC_PREFIX + "/discovery").c_str());
+    mqttClient.subscribe(MQTT_TOPIC_NOTIFICATION);
+    mqttClient.subscribe(MQTT_TOPIC_ANIMATION);
+    mqttClient.subscribe(MQTT_TOPIC_BRIGHTNESS_DAY);
+    mqttClient.subscribe(MQTT_TOPIC_BRIGHTNESS_NIGHT);
+    mqttClient.subscribe(MQTT_TOPIC_SCHEDULE_DAY_START);
+    mqttClient.subscribe(MQTT_TOPIC_SCHEDULE_NIGHT_START);
+    mqttClient.subscribe(MQTT_TOPIC_DISCOVERY);
 
     // Send discovery config and status
     sendDiscoveryConfig();
@@ -166,11 +172,6 @@ bool MQTTManager::tryReconnect()
   return false;
 }
 
-bool MQTTManager::isConnected()
-{
-  return mqttClient.connected();
-}
-
 void MQTTManager::sendStatus(const String &status)
 {
   if (mqttClient.connected())
@@ -181,10 +182,15 @@ void MQTTManager::sendStatus(const String &status)
     payload += "\"night_brightness\":" + String(nightBrightness) + ",";
     payload += "\"day_start\":\"" + minutesToTimeString(dayStartMinutes) + "\",";
     payload += "\"night_start\":\"" + minutesToTimeString(nightStartMinutes) + "\",";
-    payload += "\"is_day_time\":" + String(isDayTime() ? "true" : "false");
+    // Report the mode the display is actually in. Before the first time sync
+    // hour()/minute() read 00:00, which would say "Night" while
+    // currentAutoBrightness() is deliberately running day brightness.
+    const bool dayTime = timeManager.isTimeSynced() ? isDayTime() : true;
+    payload += "\"is_day_time\":" + String(dayTime ? "true" : "false") + ",";
+    payload += "\"time_synced\":" + String(timeManager.isTimeSynced() ? "true" : "false");
     payload += "}";
 
-    mqttClient.publish(MQTT_TOPIC_STATUS.c_str(), payload.c_str(), true); // Retained status
+    mqttClient.publish(MQTT_TOPIC_STATUS, payload.c_str(), true); // Retained status
     lastStatusPublish = millis();
   }
 }
@@ -340,22 +346,26 @@ void MQTTManager::publishNotificationHelp()
 
   // Each key becomes an attribute on the "Send Notification" entity in HA.
   // Keep this compact so the whole packet stays within MQTT_BUFFER_SIZE.
-  String help = "{"
-                "\"usage\":\"Publish plain text (scrolls once) or a JSON object\","
-                "\"message\":\"string, required\","
-                "\"scrolling\":\"bool, default true; false = static/centered\","
-                "\"speed\":\"int 5-100 ms, default 35; lower = faster\","
-                "\"repeat\":\"int 1-10, default 1\","
-                "\"brightness\":\"int 0-15 or -1, default -1 (keep current)\","
-                "\"duration\":\"int 1-30 s, default 3; static hold time\","
-                "\"flash\":\"bool, default false; quick fade out/in before holding (static only)\","
-                "\"flash_count\":\"int 1-10, default 2; number of fade pulses\","
-                "\"example\":\"{\\\"message\\\":\\\"Dinner!\\\",\\\"scrolling\\\":false,\\\"flash\\\":true}\","
-                "\"animation\":\"publish heart|wave|pulse to " +
-                MQTT_TOPIC_ANIMATION + "\""
-                                       "}";
+  // One string literal, assembled by the compiler. The topic name is spliced in
+  // via the prefix macro, so this costs no heap and no runtime concatenation.
+  static const char help[] PROGMEM =
+      "{"
+      "\"usage\":\"Publish plain text (scrolls once) or a JSON object\","
+      "\"message\":\"string, required\","
+      "\"scrolling\":\"bool, default true; false = static/centered\","
+      "\"speed\":\"int 5-100 ms, default 35; lower = faster\","
+      "\"repeat\":\"int 1-10, default 1\","
+      "\"brightness\":\"int 0-15 or -1, default -1 (keep current)\","
+      "\"duration\":\"int 1-30 s, default 3; static hold time\","
+      "\"flash\":\"bool, default false; quick fade out/in before holding (static only)\","
+      "\"flash_count\":\"int 1-10, default 2; number of fade pulses\","
+      "\"example\":\"{\\\"message\\\":\\\"Dinner!\\\",\\\"scrolling\\\":false,\\\"flash\\\":true}\","
+      "\"animation\":\"publish heart|wave|pulse to " MQTT_TOPIC_PREFIX_LITERAL "/animation\""
+      "}";
 
-  mqttClient.publish(MQTT_TOPIC_NOTIFICATION_HELP.c_str(), help.c_str(), true);
+  // Copied out of flash only for the moment it takes to publish.
+  const String helpPayload = FPSTR(help);
+  mqttClient.publish(MQTT_TOPIC_NOTIFICATION_HELP, helpPayload.c_str(), true);
 }
 
 void MQTTManager::mqttCallback(char *topic, byte *payload, unsigned int length)
@@ -422,13 +432,20 @@ void MQTTManager::handleMessage(const String &topic, const String &message)
       setNightStartMinutes(minutes);
     }
   }
-  else if (topic == MQTT_TOPIC_PREFIX + "/discovery")
+  else if (topic == MQTT_TOPIC_DISCOVERY)
   {
     sendDiscoveryConfig();
   }
   else if (topic == MQTT_TOPIC_ANIMATION)
   {
-    playAnimation(message);
+    // Queue rather than play inline: this runs inside the PubSubClient
+    // callback, and an animation blocks for seconds while calling
+    // serviceDelay() -> keepAlive() -> mqttClient.loop(), which would
+    // re-enter PubSubClient from inside its own callback.
+    NotificationConfig job;
+    job.kind = QueuedJobKind::Animation;
+    job.message = message;
+    queueNotification(job);
   }
 
   // Send updated status
@@ -446,63 +463,70 @@ void MQTTManager::showNotification(const String &message)
   updateBrightnessBasedOnTime();
 }
 
+// The four setters below all bail out when the value is unchanged. Home
+// Assistant replays retained values on every reconnect, and the documented
+// sun-based automation rewrites the schedule daily, so without this guard each
+// of those would erase-and-rewrite the LittleFS sector for no reason. ESP8266
+// flash is only good for ~10k-100k erase cycles per sector.
+
 void MQTTManager::setDayBrightness(int brightness)
 {
-  dayBrightness = constrain(brightness, 0, 15);
+  const int clamped = constrain(brightness, 0, 15);
+  if (clamped == dayBrightness)
+  {
+    return;
+  }
+  dayBrightness = clamped;
   updateBrightnessBasedOnTime();
   saveSettings();
 }
 
 void MQTTManager::setNightBrightness(int brightness)
 {
-  nightBrightness = constrain(brightness, 0, 15);
+  const int clamped = constrain(brightness, 0, 15);
+  if (clamped == nightBrightness)
+  {
+    return;
+  }
+  nightBrightness = clamped;
   updateBrightnessBasedOnTime();
   saveSettings();
 }
 
 void MQTTManager::setDayStartMinutes(int minutes)
 {
-  dayStartMinutes = constrain(minutes, 0, 1439);
+  const int clamped = constrain(minutes, 0, 1439);
+  if (clamped == dayStartMinutes)
+  {
+    return;
+  }
+  dayStartMinutes = clamped;
   updateBrightnessBasedOnTime();
   saveSettings();
 }
 
 void MQTTManager::setNightStartMinutes(int minutes)
 {
-  nightStartMinutes = constrain(minutes, 0, 1439);
+  const int clamped = constrain(minutes, 0, 1439);
+  if (clamped == nightStartMinutes)
+  {
+    return;
+  }
+  nightStartMinutes = clamped;
   updateBrightnessBasedOnTime();
   saveSettings();
 }
 
 String MQTTManager::minutesToTimeString(int minutes)
 {
-  minutes = constrain(minutes, 0, 1439);
   char buffer[9];
-  snprintf(buffer, sizeof(buffer), "%02d:%02d:00", minutes / 60, minutes % 60);
+  formatMinutesAsTime(minutes, buffer, sizeof(buffer));
   return String(buffer);
 }
 
 int MQTTManager::parseTimeStringToMinutes(const String &value)
 {
-  int firstColon = value.indexOf(':');
-  if (firstColon < 0)
-  {
-    return -1;
-  }
-
-  int parsedHour = value.substring(0, firstColon).toInt();
-
-  int secondColon = value.indexOf(':', firstColon + 1);
-  int parsedMinute = (secondColon < 0)
-                         ? value.substring(firstColon + 1).toInt()
-                         : value.substring(firstColon + 1, secondColon).toInt();
-
-  if (parsedHour < 0 || parsedHour > 23 || parsedMinute < 0 || parsedMinute > 59)
-  {
-    return -1;
-  }
-
-  return parsedHour * 60 + parsedMinute;
+  return parseTimeToMinutes(value.c_str());
 }
 
 int MQTTManager::currentAutoBrightness()
@@ -524,18 +548,7 @@ void MQTTManager::updateBrightnessBasedOnTime()
 
 bool MQTTManager::isDayTime()
 {
-  int currentMinutes = hour() * 60 + minute();
-
-  // Handle normal case (day start < night start)
-  if (dayStartMinutes < nightStartMinutes)
-  {
-    return (currentMinutes >= dayStartMinutes && currentMinutes < nightStartMinutes);
-  }
-  // Handle wrap-around case (night start < day start, e.g. day 06:30, night 22:00)
-  else
-  {
-    return (currentMinutes >= dayStartMinutes || currentMinutes < nightStartMinutes);
-  }
+  return isWithinDayWindow(hour() * 60 + minute(), dayStartMinutes, nightStartMinutes);
 }
 
 void MQTTManager::loadSettings()
@@ -633,7 +646,11 @@ void MQTTManager::showAdvancedNotification(const NotificationConfig &config)
 
   Serial.println("Showing advanced notification: " + config.message);
 
-  if (config.isScrolling)
+  // A static message that is wider than the panel would be clipped and
+  // unreadable, so scroll it instead of honouring the static request.
+  const bool mustScroll = config.isScrolling || !display.textFits(config.message);
+
+  if (mustScroll)
   {
     // Perform scrolling repeats
     for (int i = 0; i < config.scrollRepeat; i++)
@@ -689,19 +706,30 @@ void MQTTManager::parseNotificationJson(const String &jsonString)
     return;
   }
 
+  const String message = doc["message"] | "";
+  if (message.length() == 0)
+  {
+    Serial.println("Notification JSON has no message, ignoring");
+    return;
+  }
+
+  // Read each field into a local first: constrain() is a macro that evaluates
+  // its argument three times, which would mean three JSON lookups per field.
+  const int repeat = doc["repeat"] | 1;
+  const int speed = doc["speed"] | 35;
+  const int brightness = doc["brightness"] | -1;
+  const int flashCount = doc["flash_count"] | 2;
+  const int duration = doc["duration"] | 3;
+
   NotificationConfig config;
-
-  // Required field
-  config.message = doc["message"] | "No message";
-
-  // Optional fields with defaults
+  config.message = message;
   config.isScrolling = doc["scrolling"] | true;
-  config.scrollRepeat = constrain(doc["repeat"] | 1, 1, 10);
-  config.scrollSpeed = constrain(doc["speed"] | 35, 5, 100);
-  config.brightness = constrain(doc["brightness"] | -1, -1, 15);
   config.flashEffect = doc["flash"] | false;
-  config.flashCount = constrain(doc["flash_count"] | 2, 1, 10);
-  config.holdSeconds = constrain(doc["duration"] | 3, 1, 30);
+  config.scrollRepeat = constrain(repeat, 1, 10);
+  config.scrollSpeed = constrain(speed, 5, 100);
+  config.brightness = constrain(brightness, -1, 15);
+  config.flashCount = constrain(flashCount, 1, 10);
+  config.holdSeconds = constrain(duration, 1, 30);
   config.isSimpleMessage = false;
 
   queueNotification(config);
@@ -709,8 +737,21 @@ void MQTTManager::parseNotificationJson(const String &jsonString)
 
 void MQTTManager::queueNotification(const NotificationConfig &config)
 {
-  notificationQueue.push(config);
-  Serial.println("Notification queued: " + config.message + " (Queue size: " + String(notificationQueue.size()) + ")");
+  if (notificationQueue.size() >= MAX_NOTIFICATION_QUEUE_LENGTH)
+  {
+    Serial.println("Notification queue full, dropping: " + config.message);
+    return;
+  }
+
+  NotificationConfig job = config;
+  if (job.message.length() > MAX_NOTIFICATION_MESSAGE_CHARS)
+  {
+    job.message = job.message.substring(0, MAX_NOTIFICATION_MESSAGE_CHARS);
+    Serial.println("Notification message truncated to " + String(MAX_NOTIFICATION_MESSAGE_CHARS) + " chars");
+  }
+
+  notificationQueue.push(job);
+  Serial.println("Notification queued: " + job.message + " (Queue size: " + String(notificationQueue.size()) + ")");
 }
 
 void MQTTManager::processNotificationQueue()
@@ -724,10 +765,15 @@ void MQTTManager::processNotificationQueue()
   NotificationConfig config = notificationQueue.front();
   notificationQueue.pop();
 
-  Serial.println("Processing notification from queue: " + config.message + " (Remaining in queue: " + String(notificationQueue.size()) + ")");
+  Serial.println("Processing job from queue: " + config.message + " (Remaining in queue: " + String(notificationQueue.size()) + ")");
 
-  // Process the notification
-  if (config.isSimpleMessage)
+  // Everything here blocks for a while, but we are called from loop(), not from
+  // the MQTT callback, so blocking is safe.
+  if (config.kind == QueuedJobKind::Animation)
+  {
+    playAnimation(config.message);
+  }
+  else if (config.isSimpleMessage)
   {
     showNotification(config.message);
   }

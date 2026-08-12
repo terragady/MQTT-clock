@@ -43,13 +43,15 @@ time_t TimeDB::getTime()
 
   Serial.println("Reading response from server...");
 
-  // Read response
+  // Read the response body. Brace depth is tracked rather than stopping at the
+  // first '}', so a nested object in the payload cannot truncate the JSON.
+  // The loop stays bounded in both time and size, and feeds the watchdog, so a
+  // slow, huge or truncated response can never hang or exhaust the device.
   bool jsonStarted = false;
+  int braceDepth = 0;
   unsigned long readStart = millis();
   while (client.connected() || client.available())
   {
-    // Guard against a stalled connection: bound the read and keep the
-    // watchdog fed so a slow/incomplete response can never hang the device.
     if (millis() - readStart > CONNECTION_TIMEOUT)
     {
       Serial.println("Timeout reading server response");
@@ -69,14 +71,27 @@ time_t TimeDB::getTime()
     if (c == '{')
     {
       jsonStarted = true;
+      braceDepth++;
     }
+
     if (jsonStarted)
     {
+      if (result.length() >= MAX_RESPONSE_CHARS)
+      {
+        Serial.println("Server response too large, aborting");
+        client.stop();
+        return INVALID_TIME;
+      }
       result += c;
     }
+
     if (c == '}')
     {
-      break; // Complete JSON received
+      braceDepth--;
+      if (jsonStarted && braceDepth == 0)
+      {
+        break; // Complete JSON object received
+      }
     }
   }
   client.stop();

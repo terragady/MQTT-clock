@@ -5,5 +5,8 @@
 .vscode/launch.json
 .vscode/ipch
 
+# macOS Finder metadata
+.DS_Store
+
 # Local secrets - never commit real credentials (keep secrets.example.h)
 src/secrets.h

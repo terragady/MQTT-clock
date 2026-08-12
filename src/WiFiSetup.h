@@ -17,7 +17,6 @@ public:
   void initialize();
   void setHostname(const String &hostname);
   bool checkConnection(); // Check and reconnect if needed
-  bool isConnected() const;
 
   // Callback for WiFi configuration mode
   static void configModeCallback(WiFiManager *myWiFiManager);
