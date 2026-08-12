@@ -16,8 +16,14 @@ updater are supported.
 ```bash
 pio run                                   # build
 pio run -t upload --upload-port <port>    # flash over USB
-pio run -t upload --upload-port <ip>      # flash over OTA (ArduinoOTA)
+pio run -e d1_mini_ota -t upload          # flash over OTA (ArduinoOTA)
+pio test -e native                        # run host-side unit tests
 ```
+
+The `native` environment compiles `src/TimeOfDay.cpp` (time parsing, formatting
+and the day/night window) on the host and runs the Unity tests in
+`test/test_time_of_day/`. That logic is deliberately free of Arduino types so it
+can be tested without hardware.
 
 ### Secrets
 
@@ -47,6 +53,13 @@ power-cycle the device in its normal location.
 - No internet, failed time sync, or an unreachable MQTT broker never blocks the
   device. Until the first successful time sync the display shows `--:--`.
 - If the clock drops offline, its MQTT Last Will marks it unavailable in HA.
+- Notifications and animations are queued (up to 10) and played from the main
+  loop, so a burst of MQTT messages can never re-enter the network stack or
+  overrun the display. Messages beyond the queue limit are dropped, not buffered
+  indefinitely.
+- Brightness and schedule changes are only written to flash when the value
+  actually changes, so a repeated `time.set_value` automation does not wear the
+  filesystem out.
 
 ## Home Assistant
 
@@ -103,6 +116,24 @@ Base prefix: `clock/zegarTV`
 | `clock/zegarTV/status` | out (retained) | JSON status |
 | `clock/zegarTV/discovery` | in | any payload re-sends discovery |
 
+The retained status payload looks like this:
+
+```json
+{
+  "status": "online",
+  "day_brightness": 8,
+  "night_brightness": 1,
+  "day_start": "07:00:00",
+  "night_start": "22:00:00",
+  "is_day_time": true,
+  "time_synced": true
+}
+```
+
+`time_synced` is `false` until the first successful TimezoneDB fetch. While it
+is `false`, `is_day_time` reports `true`, because the display deliberately runs
+at day brightness rather than trusting an unsynced clock that reads 00:00.
+
 ## Notifications
 
 Publish to `clock/zegarTV/notification`.
@@ -112,7 +143,7 @@ Publish to `clock/zegarTV/notification`.
 
 | Field | Type | Default | Notes |
 | --- | --- | --- | --- |
-| `message` | string | — | required |
+| `message` | string | — | required, non-empty; truncated at 128 chars |
 | `scrolling` | bool | `true` | `false` = static, centered |
 | `speed` | int 5–100 | `35` | ms per step; lower = faster |
 | `repeat` | int 1–10 | `1` | scroll repeats |
@@ -123,7 +154,8 @@ Publish to `clock/zegarTV/notification`.
 
 For a static message, the text optionally fades out and back in `flash_count`
 times to grab attention, then holds steady at the set brightness for `duration`
-seconds.
+seconds. A message set to `"scrolling": false` that is too wide for the 32 px
+panel scrolls anyway, so the text is never silently cut off.
 
 Examples:
 
