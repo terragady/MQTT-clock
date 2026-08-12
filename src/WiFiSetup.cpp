@@ -21,6 +21,17 @@ void WiFiSetup::initialize()
   // Kept long (10 min) so an in-progress manual setup isn't cut short.
   wifiManager.setConfigPortalTimeout(WIFI_CONFIG_PORTAL_TIMEOUT_SECONDS);
 
+  // An OTA update reboots via a soft reset, which does not fully reinitialise
+  // the ESP8266 RF peripheral. The first association attempt after a flash
+  // therefore often fails even though the stored credentials are valid, and
+  // WiFiManager's default of a single try means it gives up immediately and
+  // raises the config portal. setCleanConnect() forces an explicit disconnect
+  // first, which clears the stale state; the retries and timeout stop one
+  // slow association from dropping us into the portal.
+  wifiManager.setCleanConnect(true);
+  wifiManager.setConnectRetries(WIFI_CONNECT_RETRIES);
+  wifiManager.setConnectTimeout(WIFI_CONNECT_TIMEOUT_SECONDS);
+
   if (!wifiManager.autoConnect(WIFI_PORTAL_AP_NAME))
   {
     Serial.println("Config portal timed out, rebooting to retry WiFi...");
@@ -28,6 +39,7 @@ void WiFiSetup::initialize()
     ESP.reset();
     delay(5000);
   }
+
   Serial.println("WiFi connected successfully");
 }
 

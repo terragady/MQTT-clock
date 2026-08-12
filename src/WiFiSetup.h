@@ -7,6 +7,8 @@
 const int WIFI_MAX_RECONNECT_ATTEMPTS = 10;     // Max reconnect attempts before reboot
 const unsigned long WIFI_RECONNECT_DELAY = 500; // Delay between reconnect attempts (ms)
 const int WIFI_CONFIG_PORTAL_TIMEOUT_SECONDS = 600; // Portal timeout before reboot/retry (10 min)
+const uint8_t WIFI_CONNECT_RETRIES = 3;             // Association attempts before falling back to the portal
+const unsigned long WIFI_CONNECT_TIMEOUT_SECONDS = 20; // Per-attempt association timeout
 
 class WiFiSetup
 {
