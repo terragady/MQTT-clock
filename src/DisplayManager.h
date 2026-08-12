@@ -12,6 +12,9 @@ public:
   void scrollMessage(const String &msg);
   void scrollMessage(const String &msg, int speed); // Overloaded version with custom speed
   void centerPrint(const String &msg);
+  // True when the message fits the panel width, so a caller can fall back to
+  // scrolling instead of printing something that would be clipped.
+  bool textFits(const String &msg);
   // Fade the currently displayed content out (to 0) and back in (to
   // targetBrightness), stepDelayMs per intensity step. The content is not
   // redrawn, only the panel intensity is modulated.
@@ -28,6 +31,11 @@ public:
 
 private:
   Max72xxPanel &matrix;
+
+  // Last intensity actually pushed to the panels, so repeated requests for the
+  // same brightness (updateBrightnessBasedOnTime runs on every loop iteration)
+  // don't turn into redundant SPI writes. -1 means "nothing written yet".
+  int lastIntensity;
 
   // Constants
   static const int FONT_WIDTH = 5;
