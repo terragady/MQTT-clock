@@ -35,12 +35,14 @@ void WebOTAManager::loop()
 
 void WebOTAManager::handleRoot()
 {
-  httpServer.send(200, "text/html", getIndexHTML());
+  // The charset must be declared or the browser falls back to Latin-1 and the
+  // UTF-8 emoji in the page render as mojibake ("ðŸ•" instead of "🕐").
+  httpServer.send(200, "text/html; charset=UTF-8", getIndexHTML());
 }
 
 void WebOTAManager::handleStatus()
 {
-  httpServer.send(200, "text/html", getStatusHTML());
+  httpServer.send(200, "text/html; charset=UTF-8", getStatusHTML());
 }
 
 void WebOTAManager::handleInfo()
@@ -67,6 +69,7 @@ String WebOTAManager::getIndexHTML()
 <html>
 <head>
     <title>MQTT Clock Control</title>
+    <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         body { font-family: Arial; margin: 20px; background: #f0f0f0; }
@@ -142,6 +145,7 @@ String WebOTAManager::getStatusHTML()
 <html>
 <head>
     <title>MQTT Clock Status</title>
+    <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta http-equiv="refresh" content="5">
     <style>
