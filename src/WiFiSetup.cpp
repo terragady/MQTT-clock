@@ -34,13 +34,13 @@ void WiFiSetup::initialize()
 
   if (!wifiManager.autoConnect(WIFI_PORTAL_AP_NAME))
   {
-    Serial.println("Config portal timed out, rebooting to retry WiFi...");
+    Serial.println(F("Config portal timed out, rebooting to retry WiFi..."));
     delay(3000);
     ESP.reset();
     delay(5000);
   }
 
-  Serial.println("WiFi connected successfully");
+  Serial.println(F("WiFi connected successfully"));
 }
 
 void WiFiSetup::setHostname(const String &hostname)
@@ -57,58 +57,60 @@ bool WiFiSetup::checkConnection()
     return true;
   }
 
-  Serial.println("WiFi connection lost, attempting to reconnect...");
+  Serial.println(F("WiFi connection lost, attempting to reconnect..."));
   reconnectAttempts++;
 
   if (reconnectAttempts > WIFI_MAX_RECONNECT_ATTEMPTS)
   {
-    Serial.println("Max reconnection attempts reached, rebooting...");
+    Serial.println(F("Max reconnection attempts reached, rebooting..."));
     display.fillScreen(LOW);
-    display.centerPrint("Reboot");
+    display.centerPrint("Reset"); // "Reboot" is 36 px and gets clipped on the 32 px panel
     delay(1000);
     ESP.restart();
     return false;
   }
 
-  Serial.print("Reconnect attempt ");
+  Serial.print(F("Reconnect attempt "));
   Serial.print(reconnectAttempts);
-  Serial.print("/");
+  Serial.print(F("/"));
   Serial.println(WIFI_MAX_RECONNECT_ATTEMPTS);
 
-  WiFi.disconnect();
-  delay(WIFI_RECONNECT_DELAY);
-  WiFi.begin(); // Reconnect using stored credentials
+  // Not WiFi.disconnect() + WiFi.begin(): on the ESP8266 core, disconnect()
+  // erases the stored SSID/password (and persists that to flash), so begin()
+  // would retry with empty credentials and the next reboot would open the
+  // config portal. reconnect() drops and rejoins without touching them.
+  WiFi.reconnect();
 
   // Wait for connection with timeout
   unsigned long startTime = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - startTime < 10000)
   {
     delay(500);
-    Serial.print(".");
+    Serial.print(F("."));
     ESP.wdtFeed(); // Feed watchdog during reconnection
   }
 
   if (WiFi.status() == WL_CONNECTED)
   {
-    Serial.println("\nWiFi reconnected!");
-    Serial.print("IP: ");
+    Serial.println(F("\nWiFi reconnected!"));
+    Serial.print(F("IP: "));
     Serial.println(WiFi.localIP());
     reconnectAttempts = 0;
     return true;
   }
 
-  Serial.println("\nReconnection failed, will retry later");
+  Serial.println(F("\nReconnection failed, will retry later"));
   return false;
 }
 
 void WiFiSetup::configModeCallback(WiFiManager *myWiFiManager)
 {
-  Serial.println("Entered config mode");
+  Serial.println(F("Entered config mode"));
   Serial.println(WiFi.softAPIP());
-  Serial.println("Wifi Manager");
-  Serial.println("Please connect to AP");
+  Serial.println(F("Wifi Manager"));
+  Serial.println(F("Please connect to AP"));
   Serial.println(myWiFiManager->getConfigPortalSSID());
-  Serial.println("To setup Wifi Configuration");
+  Serial.println(F("To setup Wifi Configuration"));
 
   if (displayInstance)
   {
