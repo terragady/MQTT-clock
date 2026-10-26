@@ -6,7 +6,6 @@
 #include <Adafruit_GFX.h> // --> https://github.com/adafruit/Adafruit-GFX-Library
 #include <Max72xxPanel.h> // --> https://github.com/markruys/arduino-Max72xxPanel
 #include <pgmspace.h>
-#include "TimeDB.h"
 #include "secrets.h" // Local, git-ignored credentials (see secrets.example.h)
 
 //******************************
@@ -14,13 +13,14 @@
 //******************************
 
 // Time and Display Settings
-const int MINUTES_BETWEEN_DATA_REFRESH = 60; // Time in minutes between data refresh
 const int DISPLAY_SCROLL_SPEED = 35;         // In milliseconds (slow = 35, normal = 25, fast = 15, very fast = 5)
 const bool FLASH_ON_SECONDS = true;          // when true the : character in the time will flash on and off as a seconds indicator
 
-// API Configuration
-constexpr const char *TIMEZONE_DB_API_KEY =SECRET_TIMEZONE_DB_API_KEY;
-constexpr const char *TIMEZONE = "Europe/Oslo";
+// Time Sync
+// POSIX TZ rule for Europe/Oslo, including the DST switch dates. TZ.h in the
+// ESP8266 core lists the rule for every zone (e.g. TZ_Europe_Warsaw).
+constexpr const char *TIMEZONE = "CET-1CEST,M3.5.0,M10.5.0/3";
+constexpr const char *NTP_SERVER = "pool.ntp.org";
 // Display Hardware Settings
 // CLK -> D5 (SCK)
 // CS  -> D6

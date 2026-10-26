@@ -2,7 +2,6 @@
 #include "Settings.h"
 #include "BackgroundService.h"
 #include "TimeOfDay.h"
-#include <TimeLib.h>
 
 // Static member initialization
 MQTTManager *MQTTManager::instance = nullptr;
@@ -183,7 +182,7 @@ void MQTTManager::sendStatus(const String &status)
     payload += "\"day_start\":\"" + minutesToTimeString(dayStartMinutes) + "\",";
     payload += "\"night_start\":\"" + minutesToTimeString(nightStartMinutes) + "\",";
     // Report the mode the display is actually in. Before the first time sync
-    // hour()/minute() read 00:00, which would say "Night" while
+    // the clock reads the 1970 epoch, which would say "Night" while
     // currentAutoBrightness() is deliberately running day brightness.
     const bool dayTime = timeManager.isTimeSynced() ? isDayTime() : true;
     payload += "\"is_day_time\":" + String(dayTime ? "true" : "false") + ",";
@@ -531,9 +530,10 @@ int MQTTManager::parseTimeStringToMinutes(const String &value)
 
 int MQTTManager::currentAutoBrightness()
 {
-  // Before the first successful time sync, hour()/minute() read 00:00, which
-  // would wrongly select night mode and blank the display. Until we actually
-  // know the time, use the (brighter, always-visible) day brightness.
+  // Before the first successful time sync the clock reads the 1970 epoch
+  // (around midnight), which would wrongly select night mode and blank the
+  // display. Until we actually know the time, use the (brighter,
+  // always-visible) day brightness.
   if (!timeManager.isTimeSynced())
   {
     return dayBrightness;
@@ -548,7 +548,7 @@ void MQTTManager::updateBrightnessBasedOnTime()
 
 bool MQTTManager::isDayTime()
 {
-  return isWithinDayWindow(hour() * 60 + minute(), dayStartMinutes, nightStartMinutes);
+  return isWithinDayWindow(timeManager.minutesSinceMidnight(), dayStartMinutes, nightStartMinutes);
 }
 
 void MQTTManager::loadSettings()

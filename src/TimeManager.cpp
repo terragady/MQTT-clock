@@ -1,77 +1,47 @@
 #include "TimeManager.h"
 #include "Settings.h"
-#include <TimeLib.h>
+#include <time.h>
 
-TimeManager::TimeManager(TimeDB &timeDBRef, DisplayManager &displayRef)
-    : timeDB(timeDBRef), display(displayRef), timeSynced(false), lastSyncAttemptMs(0)
+// The system clock starts at the 1970 epoch on boot. Anything later than this
+// (2024-01-01) can only have come from an NTP sync.
+const time_t MIN_SYNCED_EPOCH = 1704067200;
+
+void TimeManager::initialize()
 {
-}
-
-void TimeManager::updateTime()
-{
-  Serial.println("Updating Time...");
-
-  // Record the attempt time up front so failures back off (see shouldUpdateTime)
-  // instead of retrying every loop iteration.
-  lastSyncAttemptMs = millis();
-
-  // Show update indicator
-  display.showUpdateIndicator();
-
-  time_t currentTime = timeDB.getTime();
-  if (currentTime == TimeDB::INVALID_TIME)
-  {
-    // Non-blocking failure: keep the clock running (the loop shows "--:--"
-    // until the first sync) and simply retry later. No blocking error scroll.
-    Serial.println("Time update failed! Will retry later.");
-    return;
-  }
-
-  setTime(currentTime);
-  timeSynced = true;
-  Serial.println("Time updated successfully");
+  configTime(TIMEZONE, NTP_SERVER);
+  Serial.println(F("NTP sync started"));
 }
 
 String TimeManager::getFormattedTime()
 {
-  if (!timeSynced)
+  if (!isTimeSynced())
   {
-    return "--:--"; // Placeholder until the first successful time sync
+    return F("--:--"); // Placeholder until the first successful time sync
   }
-  return hourMinutes();
+
+  tm now;
+  localNow(now);
+  const char separator = (FLASH_ON_SECONDS && (now.tm_sec % 2) == 0) ? ' ' : ':';
+
+  char buffer[6]; // "HH:MM" + NUL
+  snprintf(buffer, sizeof(buffer), "%d%c%02d", now.tm_hour, separator, now.tm_min);
+  return String(buffer);
 }
 
-bool TimeManager::shouldUpdateTime()
+int TimeManager::minutesSinceMidnight()
 {
-  unsigned long nowMs = millis();
-
-  // Very first attempt right after boot.
-  if (lastSyncAttemptMs == 0)
-  {
-    return true;
-  }
-
-  // Before the first successful sync (e.g. no internet), retry on a short
-  // interval rather than every loop, so the display stays responsive.
-  if (!timeSynced)
-  {
-    return (nowMs - lastSyncAttemptMs) >= TIME_SYNC_RETRY_INTERVAL_MS;
-  }
-
-  // Once synced, refresh on the normal long interval.
-  return (nowMs - lastSyncAttemptMs) >= ((unsigned long)MINUTES_BETWEEN_DATA_REFRESH * 60000UL);
+  tm now;
+  localNow(now);
+  return now.tm_hour * 60 + now.tm_min;
 }
 
-String TimeManager::secondsIndicator()
+bool TimeManager::isTimeSynced() const
 {
-  if (FLASH_ON_SECONDS && (second() % 2) == 0)
-  {
-    return " ";
-  }
-  return ":";
+  return time(nullptr) > MIN_SYNCED_EPOCH;
 }
 
-String TimeManager::hourMinutes()
+void TimeManager::localNow(tm &out)
 {
-  return String(hour()) + secondsIndicator() + timeDB.zeroPad(minute());
+  const time_t now = time(nullptr);
+  localtime_r(&now, &out);
 }
