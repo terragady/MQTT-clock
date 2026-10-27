@@ -7,6 +7,3 @@
 // MQTT broker login (Mosquitto add-on -> Configuration -> Logins)
 #define SECRET_MQTT_USER ""
 #define SECRET_MQTT_PASSWORD ""
-
-// TimezoneDB API key (https://timezonedb.com/account)
-#define SECRET_TIMEZONE_DB_API_KEY ""

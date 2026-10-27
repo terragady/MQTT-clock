@@ -2,7 +2,6 @@
 #include "Settings.h"
 #include "BackgroundService.h"
 #include "TimeOfDay.h"
-#include <TimeLib.h>
 
 // Static member initialization
 MQTTManager *MQTTManager::instance = nullptr;
@@ -25,20 +24,20 @@ void MQTTManager::initialize()
     if (LittleFS.begin())
     {
       filesystemAvailable = true;
-      Serial.println("LittleFS initialized successfully");
+      Serial.println(F("LittleFS initialized successfully"));
       loadSettings();
       break;
     }
-    Serial.print("LittleFS initialization attempt ");
+    Serial.print(F("LittleFS initialization attempt "));
     Serial.print(attempt + 1);
-    Serial.println(" failed, retrying...");
+    Serial.println(F(" failed, retrying..."));
     delay(100);
   }
 
   if (!filesystemAvailable)
   {
-    Serial.println("LittleFS initialization failed after 3 attempts! Using defaults.");
-    Serial.println("Settings will not be persisted.");
+    Serial.println(F("LittleFS initialization failed after 3 attempts! Using defaults."));
+    Serial.println(F("Settings will not be persisted."));
   }
 
   // Cap how long the underlying TCP connect can block so a missing or
@@ -51,7 +50,7 @@ void MQTTManager::initialize()
   mqttClient.setBufferSize(MQTT_BUFFER_SIZE);
   mqttClient.setSocketTimeout(MQTT_SOCKET_TIMEOUT_S); // cap MQTT handshake/read wait
 
-  Serial.println("MQTT Manager initialized");
+  Serial.println(F("MQTT Manager initialized"));
 
   // Do NOT connect here. Connecting is handled lazily and rate-limited in
   // loop() -> tryReconnect(), so setup() never blocks on an unreachable
@@ -72,11 +71,8 @@ void MQTTManager::loop()
     processNotificationQueue();
   }
 
-  // Update brightness based on current time (only if not showing notification)
-  if (!showingNotification)
-  {
-    updateBrightnessBasedOnTime();
-  }
+  // Update brightness based on current time (no-op while a notification shows)
+  updateBrightnessBasedOnTime();
 
   // Periodically refresh status so HA sensors (Day/Night mode, etc.) stay
   // current as the clock crosses a schedule boundary, even with no commands.
@@ -107,9 +103,19 @@ bool MQTTManager::tryReconnect()
     return true;
   }
 
+  // Each failed attempt can block for up to MQTT_CONNECT_TIMEOUT_MS, so back
+  // off (5 s, 10 s, 20 s, 40 s, then 60 s) rather than stalling the clock for
+  // most of every 5 s while the broker is down.
+  const int backoffSteps = reconnectAttempts < 4 ? reconnectAttempts : 4;
+  unsigned long interval = MQTT_RECONNECT_INTERVAL << backoffSteps;
+  if (interval > MQTT_MAX_RECONNECT_INTERVAL)
+  {
+    interval = MQTT_MAX_RECONNECT_INTERVAL;
+  }
+
   // Check if enough time has passed since last attempt
   unsigned long now = millis();
-  if (now - lastReconnectAttempt < MQTT_RECONNECT_INTERVAL)
+  if (now - lastReconnectAttempt < interval)
   {
     return false;
   }
@@ -117,9 +123,9 @@ bool MQTTManager::tryReconnect()
   lastReconnectAttempt = now;
   reconnectAttempts++;
 
-  Serial.print("Attempting MQTT connection (attempt ");
+  Serial.print(F("Attempting MQTT connection (attempt "));
   Serial.print(reconnectAttempts);
-  Serial.print(")...");
+  Serial.print(F(")..."));
 
   // A stable, MAC-derived client id. Generating a random id per attempt made
   // the broker treat every reconnect as a brand-new session, so the *previous*
@@ -146,7 +152,7 @@ bool MQTTManager::tryReconnect()
 
   if (connected)
   {
-    Serial.println(" connected!");
+    Serial.println(F(" connected!"));
     reconnectAttempts = 0;
 
     // Subscribe to topics
@@ -162,13 +168,13 @@ bool MQTTManager::tryReconnect()
     sendDiscoveryConfig();
     sendStatus("online");
 
-    Serial.println("Subscribed to MQTT topics");
+    Serial.println(F("Subscribed to MQTT topics"));
     return true;
   }
 
-  Serial.print(" failed, rc=");
+  Serial.print(F(" failed, rc="));
   Serial.print(mqttClient.state());
-  Serial.println(" will retry later");
+  Serial.println(F(" will retry later"));
   return false;
 }
 
@@ -183,7 +189,7 @@ void MQTTManager::sendStatus(const String &status)
     payload += "\"day_start\":\"" + minutesToTimeString(dayStartMinutes) + "\",";
     payload += "\"night_start\":\"" + minutesToTimeString(nightStartMinutes) + "\",";
     // Report the mode the display is actually in. Before the first time sync
-    // hour()/minute() read 00:00, which would say "Night" while
+    // the clock reads the 1970 epoch, which would say "Night" while
     // currentAutoBrightness() is deliberately running day brightness.
     const bool dayTime = timeManager.isTimeSynced() ? isDayTime() : true;
     payload += "\"is_day_time\":" + String(dayTime ? "true" : "false") + ",";
@@ -202,29 +208,36 @@ String MQTTManager::getDeviceId()
   return deviceId;
 }
 
-String MQTTManager::buildDeviceInfo()
-{
-  return "\"device\":{"
-         "\"identifiers\":[\"" +
-         getDeviceId() + "\"],"
-                         "\"name\":\"MQTT Clock\","
-                         "\"model\":\"ESP8266 LED Matrix Clock\","
-                         "\"manufacturer\":\"Custom\","
-                         "\"sw_version\":\"1.0\""
-                         "}";
-}
-
-void MQTTManager::publishDiscovery(const String &component, const String &objectId, const String &fields)
+void MQTTManager::publishDiscovery(const char *component, const char *objectId, JsonDocument &config)
 {
   if (!mqttClient.connected())
   {
     return;
   }
-  String payload = "{" + fields + "," + buildDeviceInfo() + "}";
-  String topic = "homeassistant/" + component + "/mqtt_clock/" + objectId + "/config";
+
+  // Every entity follows the status topic for availability, so when the Last
+  // Will publishes {"status":"offline"} Home Assistant marks them all
+  // unavailable instead of only the status sensor reading "offline".
+  config["availability_topic"] = MQTT_TOPIC_STATUS;
+  config["availability_template"] = F("{{ value_json.status }}");
+
+  JsonObject device = config["device"].to<JsonObject>();
+  device["identifiers"].add(getDeviceId());
+  device["name"] = F("MQTT Clock");
+  device["model"] = F("ESP8266 LED Matrix Clock");
+  device["manufacturer"] = F("Custom");
+  device["sw_version"] = F("1.0");
+
+  String payload;
+  serializeJson(config, payload);
+  const String topic = String(F("homeassistant/")) + component + F("/mqtt_clock/") + objectId + F("/config");
   mqttClient.publish(topic.c_str(), payload.c_str(), true);
 }
 
+// The entity configs are built with ArduinoJson and F() strings rather than
+// one long concatenated literal per entity: those literals came to ~1.8 KB that
+// the ESP8266 kept in RAM for good. The unique_ids must stay exactly as they
+// are, or Home Assistant creates duplicate entities.
 void MQTTManager::sendDiscoveryConfig()
 {
   if (!mqttClient.connected())
@@ -235,76 +248,86 @@ void MQTTManager::sendDiscoveryConfig()
   const String id = getDeviceId();
 
   // 1. Status Sensor
-  publishDiscovery("sensor", "status",
-                   "\"name\":\"Clock Status\","
-                   "\"unique_id\":\"" +
-                       id + "_status\","
-                            "\"state_topic\":\"" +
-                       MQTT_TOPIC_STATUS + "\","
-                                           "\"value_template\":\"{{ value_json.status }}\","
-                                           "\"icon\":\"mdi:clock-digital\"");
+  {
+    JsonDocument config;
+    config["name"] = F("Clock Status");
+    config["unique_id"] = id + F("_status");
+    config["state_topic"] = MQTT_TOPIC_STATUS;
+    config["value_template"] = F("{{ value_json.status }}");
+    config["icon"] = F("mdi:clock-digital");
+    publishDiscovery("sensor", "status", config);
+  }
 
   // 2. Day/Night Mode Sensor
-  publishDiscovery("sensor", "daynight",
-                   "\"name\":\"Day/Night Mode\","
-                   "\"unique_id\":\"" +
-                       id + "_daynight\","
-                            "\"state_topic\":\"" +
-                       MQTT_TOPIC_STATUS + "\","
-                                           "\"value_template\":\"{% if value_json.is_day_time %}Day{% else %}Night{% endif %}\","
-                                           "\"icon\":\"mdi:weather-sunny\"");
+  {
+    JsonDocument config;
+    config["name"] = F("Day/Night Mode");
+    config["unique_id"] = id + F("_daynight");
+    config["state_topic"] = MQTT_TOPIC_STATUS;
+    config["value_template"] = F("{% if value_json.is_day_time %}Day{% else %}Night{% endif %}");
+    config["icon"] = F("mdi:weather-sunny");
+    publishDiscovery("sensor", "daynight", config);
+  }
 
   // 3. Day Brightness Number Control
-  publishDiscovery("number", "day_brightness",
-                   "\"name\":\"Day Brightness\","
-                   "\"unique_id\":\"" +
-                       id + "_day_brightness\","
-                            "\"state_topic\":\"" +
-                       MQTT_TOPIC_STATUS + "\","
-                                           "\"command_topic\":\"" +
-                       MQTT_TOPIC_BRIGHTNESS_DAY + "\","
-                                                   "\"value_template\":\"{{ value_json.day_brightness }}\","
-                                                   "\"min\":0,\"max\":15,\"step\":1,"
-                                                   "\"icon\":\"mdi:brightness-6\"");
+  {
+    JsonDocument config;
+    config["name"] = F("Day Brightness");
+    config["unique_id"] = id + F("_day_brightness");
+    config["state_topic"] = MQTT_TOPIC_STATUS;
+    config["command_topic"] = MQTT_TOPIC_BRIGHTNESS_DAY;
+    config["value_template"] = F("{{ value_json.day_brightness }}");
+    config["min"] = 0;
+    config["max"] = 15;
+    config["step"] = 1;
+    config["icon"] = F("mdi:brightness-6");
+    publishDiscovery("number", "day_brightness", config);
+  }
 
   // 4. Night Brightness Number Control
-  publishDiscovery("number", "night_brightness",
-                   "\"name\":\"Night Brightness\","
-                   "\"unique_id\":\"" +
-                       id + "_night_brightness\","
-                            "\"state_topic\":\"" +
-                       MQTT_TOPIC_STATUS + "\","
-                                           "\"command_topic\":\"" +
-                       MQTT_TOPIC_BRIGHTNESS_NIGHT + "\","
-                                                     "\"value_template\":\"{{ value_json.night_brightness }}\","
-                                                     "\"min\":0,\"max\":15,\"step\":1,"
-                                                     "\"icon\":\"mdi:brightness-3\"");
+  {
+    JsonDocument config;
+    config["name"] = F("Night Brightness");
+    config["unique_id"] = id + F("_night_brightness");
+    config["state_topic"] = MQTT_TOPIC_STATUS;
+    config["command_topic"] = MQTT_TOPIC_BRIGHTNESS_NIGHT;
+    config["value_template"] = F("{{ value_json.night_brightness }}");
+    config["min"] = 0;
+    config["max"] = 15;
+    config["step"] = 1;
+    config["icon"] = F("mdi:brightness-3");
+    publishDiscovery("number", "night_brightness", config);
+  }
 
   // 5. Notification Text Input. The json_attributes_topic surfaces the usage
   // docs (schema + examples) as entity attributes inside Home Assistant.
-  publishDiscovery("text", "notification",
-                   "\"name\":\"Send Notification\","
-                   "\"unique_id\":\"" +
-                       id + "_notification\","
-                            "\"command_topic\":\"" +
-                       MQTT_TOPIC_NOTIFICATION + "\","
-                                                 "\"json_attributes_topic\":\"" +
-                       MQTT_TOPIC_NOTIFICATION_HELP + "\","
-                                                      "\"icon\":\"mdi:message-text\"");
+  {
+    JsonDocument config;
+    config["name"] = F("Send Notification");
+    config["unique_id"] = id + F("_notification");
+    config["command_topic"] = MQTT_TOPIC_NOTIFICATION;
+    config["json_attributes_topic"] = MQTT_TOPIC_NOTIFICATION_HELP;
+    config["icon"] = F("mdi:message-text");
+    publishDiscovery("text", "notification", config);
+  }
 
   // Publish the usage docs (retained) so they appear under the notification
   // entity's Attributes in Home Assistant.
   publishNotificationHelp();
 
   // 6. Animation Select (dropdown: heart / wave / pulse)
-  publishDiscovery("select", "animation",
-                   "\"name\":\"Animation\","
-                   "\"unique_id\":\"" +
-                       id + "_animation\","
-                            "\"command_topic\":\"" +
-                       MQTT_TOPIC_ANIMATION + "\","
-                                              "\"options\":[\"heart\",\"wave\",\"pulse\"],"
-                                              "\"icon\":\"mdi:animation-play\"");
+  {
+    JsonDocument config;
+    config["name"] = F("Animation");
+    config["unique_id"] = id + F("_animation");
+    config["command_topic"] = MQTT_TOPIC_ANIMATION;
+    JsonArray options = config["options"].to<JsonArray>();
+    options.add(F("heart"));
+    options.add(F("wave"));
+    options.add(F("pulse"));
+    config["icon"] = F("mdi:animation-play");
+    publishDiscovery("select", "animation", config);
+  }
 
   // Remove the previous hour-only "number" entities (superseded by the time
   // entities below). Publishing an empty retained payload deletes a stale
@@ -313,28 +336,28 @@ void MQTTManager::sendDiscoveryConfig()
   mqttClient.publish("homeassistant/number/mqtt_clock/night_start/config", "", true);
 
   // 7. Day Start Time (HH:MM). A Sun-based HA automation can write to this.
-  publishDiscovery("time", "day_start",
-                   "\"name\":\"Day Start Time\","
-                   "\"unique_id\":\"" +
-                       id + "_day_start_time\","
-                            "\"state_topic\":\"" +
-                       MQTT_TOPIC_STATUS + "\","
-                                           "\"command_topic\":\"" +
-                       MQTT_TOPIC_SCHEDULE_DAY_START + "\","
-                                                      "\"value_template\":\"{{ value_json.day_start }}\","
-                                                      "\"icon\":\"mdi:weather-sunset-up\"");
+  {
+    JsonDocument config;
+    config["name"] = F("Day Start Time");
+    config["unique_id"] = id + F("_day_start_time");
+    config["state_topic"] = MQTT_TOPIC_STATUS;
+    config["command_topic"] = MQTT_TOPIC_SCHEDULE_DAY_START;
+    config["value_template"] = F("{{ value_json.day_start }}");
+    config["icon"] = F("mdi:weather-sunset-up");
+    publishDiscovery("time", "day_start", config);
+  }
 
   // 8. Night Start Time (HH:MM). A Sun-based HA automation can write to this.
-  publishDiscovery("time", "night_start",
-                   "\"name\":\"Night Start Time\","
-                   "\"unique_id\":\"" +
-                       id + "_night_start_time\","
-                            "\"state_topic\":\"" +
-                       MQTT_TOPIC_STATUS + "\","
-                                           "\"command_topic\":\"" +
-                       MQTT_TOPIC_SCHEDULE_NIGHT_START + "\","
-                                                        "\"value_template\":\"{{ value_json.night_start }}\","
-                                                        "\"icon\":\"mdi:weather-sunset-down\"");
+  {
+    JsonDocument config;
+    config["name"] = F("Night Start Time");
+    config["unique_id"] = id + F("_night_start_time");
+    config["state_topic"] = MQTT_TOPIC_STATUS;
+    config["command_topic"] = MQTT_TOPIC_SCHEDULE_NIGHT_START;
+    config["value_template"] = F("{{ value_json.night_start }}");
+    config["icon"] = F("mdi:weather-sunset-down");
+    publishDiscovery("time", "night_start", config);
+  }
 }
 
 void MQTTManager::publishNotificationHelp()
@@ -385,6 +408,13 @@ void MQTTManager::handleMessage(const String &topic, const String &message)
 {
   if (topic == MQTT_TOPIC_NOTIFICATION)
   {
+    // An empty payload (clearing a retained message, or an emptied HA text
+    // entity) has nothing to show; don't scroll a blank space for it.
+    if (message.length() == 0)
+    {
+      return;
+    }
+
     // Check if message is JSON (starts with '{')
     if (message.startsWith("{"))
     {
@@ -531,9 +561,10 @@ int MQTTManager::parseTimeStringToMinutes(const String &value)
 
 int MQTTManager::currentAutoBrightness()
 {
-  // Before the first successful time sync, hour()/minute() read 00:00, which
-  // would wrongly select night mode and blank the display. Until we actually
-  // know the time, use the (brighter, always-visible) day brightness.
+  // Before the first successful time sync the clock reads the 1970 epoch
+  // (around midnight), which would wrongly select night mode and blank the
+  // display. Until we actually know the time, use the (brighter,
+  // always-visible) day brightness.
   if (!timeManager.isTimeSynced())
   {
     return dayBrightness;
@@ -543,12 +574,20 @@ int MQTTManager::currentAutoBrightness()
 
 void MQTTManager::updateBrightnessBasedOnTime()
 {
+  // A notification may have set its own brightness, and a brightness/schedule
+  // message can arrive mid-notification via serviceDelay() -> keepAlive().
+  // Leave the panel alone; every notification path calls this again once
+  // showingNotification is cleared.
+  if (showingNotification)
+  {
+    return;
+  }
   display.setIntensity(currentAutoBrightness());
 }
 
 bool MQTTManager::isDayTime()
 {
-  return isWithinDayWindow(hour() * 60 + minute(), dayStartMinutes, nightStartMinutes);
+  return isWithinDayWindow(timeManager.minutesSinceMidnight(), dayStartMinutes, nightStartMinutes);
 }
 
 void MQTTManager::loadSettings()
@@ -556,7 +595,7 @@ void MQTTManager::loadSettings()
   File file = LittleFS.open("/clock_settings.json", "r");
   if (!file)
   {
-    Serial.println("No settings file found, using defaults");
+    Serial.println(F("No settings file found, using defaults"));
     return;
   }
 
@@ -566,7 +605,7 @@ void MQTTManager::loadSettings()
 
   if (error)
   {
-    Serial.println("Failed to parse settings file, using defaults");
+    Serial.println(F("Failed to parse settings file, using defaults"));
     return;
   }
 
@@ -602,7 +641,7 @@ void MQTTManager::saveSettings()
 {
   if (!filesystemAvailable)
   {
-    Serial.println("Filesystem not available, cannot save settings");
+    Serial.println(F("Filesystem not available, cannot save settings"));
     return;
   }
 
@@ -616,17 +655,17 @@ void MQTTManager::saveSettings()
   File file = LittleFS.open("/clock_settings.json", "w");
   if (!file)
   {
-    Serial.println("Failed to open settings file for writing");
+    Serial.println(F("Failed to open settings file for writing"));
     return;
   }
 
   if (serializeJson(doc, file) == 0)
   {
-    Serial.println("Failed to write settings to file");
+    Serial.println(F("Failed to write settings to file"));
   }
   else
   {
-    Serial.println("Settings saved successfully");
+    Serial.println(F("Settings saved successfully"));
   }
 
   file.close();
@@ -644,7 +683,8 @@ void MQTTManager::showAdvancedNotification(const NotificationConfig &config)
     display.setIntensity(config.brightness);
   }
 
-  Serial.println("Showing advanced notification: " + config.message);
+  Serial.print(F("Showing advanced notification: "));
+  Serial.println(config.message);
 
   // A static message that is wider than the panel would be clipped and
   // unreadable, so scroll it instead of honouring the static request.
@@ -701,15 +741,20 @@ void MQTTManager::parseNotificationJson(const String &jsonString)
 
   if (error)
   {
-    Serial.println("Failed to parse notification JSON, using simple message");
-    showNotification(jsonString);
+    // Queue it rather than show it here: this runs inside the MQTT callback
+    // (see the animation branch in handleMessage).
+    Serial.println(F("Failed to parse notification JSON, using simple message"));
+    NotificationConfig config;
+    config.message = jsonString;
+    config.isSimpleMessage = true;
+    queueNotification(config);
     return;
   }
 
   const String message = doc["message"] | "";
   if (message.length() == 0)
   {
-    Serial.println("Notification JSON has no message, ignoring");
+    Serial.println(F("Notification JSON has no message, ignoring"));
     return;
   }
 
@@ -739,7 +784,8 @@ void MQTTManager::queueNotification(const NotificationConfig &config)
 {
   if (notificationQueue.size() >= MAX_NOTIFICATION_QUEUE_LENGTH)
   {
-    Serial.println("Notification queue full, dropping: " + config.message);
+    Serial.print(F("Notification queue full, dropping: "));
+    Serial.println(config.message);
     return;
   }
 
@@ -747,11 +793,11 @@ void MQTTManager::queueNotification(const NotificationConfig &config)
   if (job.message.length() > MAX_NOTIFICATION_MESSAGE_CHARS)
   {
     job.message = job.message.substring(0, MAX_NOTIFICATION_MESSAGE_CHARS);
-    Serial.println("Notification message truncated to " + String(MAX_NOTIFICATION_MESSAGE_CHARS) + " chars");
+    Serial.printf_P(PSTR("Notification message truncated to %u chars\n"), MAX_NOTIFICATION_MESSAGE_CHARS);
   }
 
   notificationQueue.push(job);
-  Serial.println("Notification queued: " + job.message + " (Queue size: " + String(notificationQueue.size()) + ")");
+  Serial.printf_P(PSTR("Notification queued: %s (Queue size: %u)\n"), job.message.c_str(), notificationQueue.size());
 }
 
 void MQTTManager::processNotificationQueue()
@@ -765,7 +811,7 @@ void MQTTManager::processNotificationQueue()
   NotificationConfig config = notificationQueue.front();
   notificationQueue.pop();
 
-  Serial.println("Processing job from queue: " + config.message + " (Remaining in queue: " + String(notificationQueue.size()) + ")");
+  Serial.printf_P(PSTR("Processing job from queue: %s (Remaining in queue: %u)\n"), config.message.c_str(), notificationQueue.size());
 
   // Everything here blocks for a while, but we are called from loop(), not from
   // the MQTT callback, so blocking is safe.
@@ -909,8 +955,10 @@ void MQTTManager::playAnimation(const String &animationType)
     for (int i = 0; i < 3; i++)
     {
       display.fillScreen(HIGH);
+      display.write();
       serviceDelay(200);
       display.fillScreen(LOW);
+      display.write();
       serviceDelay(200);
     }
   }

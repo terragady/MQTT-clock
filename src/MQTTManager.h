@@ -33,7 +33,8 @@ struct NotificationConfig
 };
 
 // Timing constants
-const unsigned long MQTT_RECONNECT_INTERVAL = 5000; // Time between reconnect attempts (ms)
+const unsigned long MQTT_RECONNECT_INTERVAL = 5000; // Initial time between reconnect attempts (ms)
+const unsigned long MQTT_MAX_RECONNECT_INTERVAL = 60000UL; // Backoff ceiling between reconnect attempts (ms)
 const int MQTT_BUFFER_SIZE = 1024;                  // MQTT buffer size for discovery messages
 const int MQTT_CONNECT_TIMEOUT_MS = 3000;           // Max blocking time for TCP connect (ms)
 const uint16_t MQTT_SOCKET_TIMEOUT_S = 3;           // Max blocking time for MQTT handshake/reads (s)
@@ -92,11 +93,10 @@ private:
   NotificationConfig currentConfig;
 
   // Discovery helpers
-  String getDeviceId();     // Stable per-device id derived from the MAC
-  String buildDeviceInfo(); // Shared "device" JSON block for every entity
-  // Publish one retained discovery config. `fields` is the entity-specific JSON
-  // body (no braces); this wraps it with the shared device block and topic.
-  void publishDiscovery(const String &component, const String &objectId, const String &fields);
+  String getDeviceId(); // Stable per-device id derived from the MAC
+  // Publish one retained discovery config. `config` holds the entity-specific
+  // fields; this adds availability and the shared device block.
+  void publishDiscovery(const char *component, const char *objectId, JsonDocument &config);
 
   // Helper functions
   static void mqttCallback(char *topic, byte *payload, unsigned int length);

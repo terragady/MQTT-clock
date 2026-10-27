@@ -14,7 +14,7 @@ void OTAManager::initialize()
   // Setup mDNS
   if (MDNS.begin(DEVICE_HOSTNAME))
   {
-    Serial.println("mDNS responder started");
+    Serial.println(F("mDNS responder started"));
   }
 
   // Setup OTA
@@ -28,9 +28,10 @@ void OTAManager::initialize()
 
   ArduinoOTA.begin();
 
-  Serial.println("OTA update ready");
-  Serial.println(String("Hostname: ") + DEVICE_HOSTNAME);
-  Serial.println("OTA Password: mqtt-clock-ota");
+  Serial.println(F("OTA update ready"));
+  Serial.print(F("Hostname: "));
+  Serial.println(DEVICE_HOSTNAME);
+  Serial.println(F("OTA Password: mqtt-clock-ota"));
 }
 
 void OTAManager::loop()
@@ -51,7 +52,8 @@ void OTAManager::onStart()
     type = "filesystem";
   }
 
-  Serial.println("Start updating " + type);
+  Serial.print(F("Start updating "));
+  Serial.println(type);
 
   if (instance)
   {
@@ -63,7 +65,7 @@ void OTAManager::onStart()
 
 void OTAManager::onEnd()
 {
-  Serial.println("\nEnd");
+  Serial.println(F("\nEnd"));
 
   if (instance)
   {
@@ -81,7 +83,7 @@ void OTAManager::onProgress(unsigned int progress, unsigned int total)
   // other way round avoids the inner division entirely.
   const unsigned int percent = (total == 0) ? 0 : (unsigned int)((progress * 100ULL) / total);
 
-  Serial.printf("Progress: %u%%\r", percent);
+  Serial.printf_P(PSTR("Progress: %u%%\r"), percent);
 
   if (instance)
   {
@@ -93,32 +95,32 @@ void OTAManager::onProgress(unsigned int progress, unsigned int total)
 
 void OTAManager::onError(ota_error_t error)
 {
-  Serial.printf("Error[%u]: ", error);
+  Serial.printf_P(PSTR("Error[%u]: "), error);
   String errorMsg = "Err";
 
   if (error == OTA_AUTH_ERROR)
   {
-    Serial.println("Auth Failed");
+    Serial.println(F("Auth Failed"));
     errorMsg = "Auth";
   }
   else if (error == OTA_BEGIN_ERROR)
   {
-    Serial.println("Begin Failed");
+    Serial.println(F("Begin Failed"));
     errorMsg = "Begin";
   }
   else if (error == OTA_CONNECT_ERROR)
   {
-    Serial.println("Connect Failed");
+    Serial.println(F("Connect Failed"));
     errorMsg = "Conn";
   }
   else if (error == OTA_RECEIVE_ERROR)
   {
-    Serial.println("Receive Failed");
+    Serial.println(F("Receive Failed"));
     errorMsg = "Recv";
   }
   else if (error == OTA_END_ERROR)
   {
-    Serial.println("End Failed");
+    Serial.println(F("End Failed"));
     errorMsg = "End";
   }
 

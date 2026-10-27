@@ -20,7 +20,6 @@ public:
   // redrawn, only the panel intensity is modulated.
   void fadeMessage(int targetBrightness, int stepDelayMs);
   void performBrightnessAnimation();
-  void showUpdateIndicator();
   void initializeMatrix();
 
   // Display configuration

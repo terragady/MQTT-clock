@@ -33,8 +33,8 @@ Credentials are kept out of source control. Copy the template and fill it in:
 cp src/secrets.example.h src/secrets.h
 ```
 
-`src/secrets.h` is git-ignored. It defines `SECRET_MQTT_USER`,
-`SECRET_MQTT_PASSWORD`, and `SECRET_TIMEZONE_DB_API_KEY`.
+`src/secrets.h` is git-ignored. It defines `SECRET_MQTT_USER` and
+`SECRET_MQTT_PASSWORD`.
 
 Other settings (MQTT broker IP, timezone, pins, display size, default schedule
 and brightness) live in `src/Settings.h`.
@@ -52,6 +52,9 @@ power-cycle the device in its normal location.
   always reachable even if a network service is slow or down.
 - No internet, failed time sync, or an unreachable MQTT broker never blocks the
   device. Until the first successful time sync the display shows `--:--`.
+- Time comes from NTP (`pool.ntp.org`) and is resynced hourly in the background.
+  The timezone is a POSIX TZ rule in `Settings.h`, so DST switches apply at the
+  exact moment they happen.
 - If the clock drops offline, its MQTT Last Will marks it unavailable in HA.
 - Notifications and animations are queued (up to 10) and played from the main
   loop, so a burst of MQTT messages can never re-enter the network stack or
@@ -130,7 +133,7 @@ The retained status payload looks like this:
 }
 ```
 
-`time_synced` is `false` until the first successful TimezoneDB fetch. While it
+`time_synced` is `false` until the first successful NTP sync. While it
 is `false`, `is_day_time` reports `true`, because the display deliberately runs
 at day brightness rather than trusting an unsynced clock that reads 00:00.
 

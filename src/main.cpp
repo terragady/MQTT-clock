@@ -26,10 +26,9 @@ String lastDisplayedTime;
 bool servicesReady = false;
 
 // Core components
-TimeDB timeDB(TIMEZONE_DB_API_KEY);
 DisplayManager displayManager(matrix);
 WiFiSetup wifiSetup(displayManager);
-TimeManager timeManager(timeDB, displayManager);
+TimeManager timeManager;
 MQTTManager mqttManager(displayManager, timeManager);
 OTAManager otaManager(displayManager);
 WebOTAManager webOtaManager(displayManager);
@@ -72,7 +71,7 @@ void setup()
 
   // Enable hardware watchdog (8 seconds timeout)
   ESP.wdtEnable(WDTO_8S);
-  Serial.println("Watchdog enabled");
+  Serial.println(F("Watchdog enabled"));
 
   // Initialize matrix display
   displayManager.initializeMatrix();
@@ -92,6 +91,9 @@ void setup()
   // later service (MQTT/time) is slow or unreachable.
   otaManager.initialize();
   webOtaManager.initialize();
+
+  // Start background NTP sync (non-blocking)
+  timeManager.initialize();
 
   // Initialize MQTT last. Connection is established lazily in loop()
   // (see mqttManager.loop()), so this call never blocks startup.
@@ -122,12 +124,6 @@ void loop()
 
   // Handle MQTT
   mqttManager.loop();
-
-  // Update time if needed
-  if (timeManager.shouldUpdateTime())
-  {
-    timeManager.updateTime();
-  }
 
   // Only show clock if not displaying notification
   if (!mqttManager.isShowingNotification())

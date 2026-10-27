@@ -22,10 +22,12 @@ void WebOTAManager::initialize()
 
   httpServer.begin();
 
-  Serial.println("Web OTA Server started");
-  Serial.println("Update URL: http://" + WiFi.localIP().toString() + "/update");
-  Serial.println("Username: admin");
-  Serial.println("Password: mqtt-clock-web");
+  Serial.println(F("Web OTA Server started"));
+  Serial.print(F("Update URL: http://"));
+  Serial.print(WiFi.localIP());
+  Serial.println(F("/update"));
+  Serial.println(F("Username: admin"));
+  Serial.println(F("Password: mqtt-clock-web"));
 }
 
 void WebOTAManager::loop()
@@ -62,9 +64,12 @@ void WebOTAManager::handleInfo()
   httpServer.send(200, "application/json", json);
 }
 
-String WebOTAManager::getIndexHTML()
-{
-  String html = R"(
+// The page templates live in flash (PROGMEM). As ordinary string literals the
+// ESP8266 copies them into its ~80 KB of RAM at boot and keeps them there for
+// good, even though they are only needed while a page is being served.
+// %TOKENS% are filled in per request; the MQTT topics are compile-time
+// constants, so they are spliced in by literal concatenation instead.
+static const char INDEX_HTML[] PROGMEM = R"(
 <!DOCTYPE html>
 <html>
 <head>
@@ -89,14 +94,10 @@ String WebOTAManager::getIndexHTML()
 
         <div class="card">
             <h3>📡 Device Information</h3>
-            <p><strong>IP Address:</strong> )" +
-                WiFi.localIP().toString() + R"(</p>
-            <p><strong>Hostname:</strong> )" +
-                String(DEVICE_HOSTNAME) + R"(</p>
-            <p><strong>MAC Address:</strong> )" +
-                WiFi.macAddress() + R"(</p>
-            <p><strong>Uptime:</strong> )" +
-                String(millis() / 1000) + R"( seconds</p>
+            <p><strong>IP Address:</strong> %IP%</p>
+            <p><strong>Hostname:</strong> %HOSTNAME%</p>
+            <p><strong>MAC Address:</strong> %MAC%</p>
+            <p><strong>Uptime:</strong> %UPTIME% seconds</p>
         </div>
 
         <div class="card">
@@ -116,31 +117,20 @@ String WebOTAManager::getIndexHTML()
 
         <div class="card">
             <h3>📋 MQTT Topics</h3>
-            <p><strong>Notifications:</strong> <code>)" +
-                MQTT_TOPIC_NOTIFICATION + R"(</code></p>
-            <p><strong>Animation:</strong> <code>)" +
-                MQTT_TOPIC_ANIMATION + R"(</code></p>
-            <p><strong>Day Brightness:</strong> <code>)" +
-                MQTT_TOPIC_BRIGHTNESS_DAY + R"(</code></p>
-            <p><strong>Night Brightness:</strong> <code>)" +
-                MQTT_TOPIC_BRIGHTNESS_NIGHT + R"(</code></p>
-            <p><strong>Day Start:</strong> <code>)" +
-                MQTT_TOPIC_SCHEDULE_DAY_START + R"(</code></p>
-            <p><strong>Night Start:</strong> <code>)" +
-                MQTT_TOPIC_SCHEDULE_NIGHT_START + R"(</code></p>
-            <p><strong>Status:</strong> <code>)" +
-                MQTT_TOPIC_STATUS + R"(</code></p>
+            <p><strong>Notifications:</strong> <code>)" MQTT_TOPIC_PREFIX_LITERAL R"(/notification</code></p>
+            <p><strong>Animation:</strong> <code>)" MQTT_TOPIC_PREFIX_LITERAL R"(/animation</code></p>
+            <p><strong>Day Brightness:</strong> <code>)" MQTT_TOPIC_PREFIX_LITERAL R"(/brightness/day</code></p>
+            <p><strong>Night Brightness:</strong> <code>)" MQTT_TOPIC_PREFIX_LITERAL R"(/brightness/night</code></p>
+            <p><strong>Day Start:</strong> <code>)" MQTT_TOPIC_PREFIX_LITERAL R"(/schedule/day_start</code></p>
+            <p><strong>Night Start:</strong> <code>)" MQTT_TOPIC_PREFIX_LITERAL R"(/schedule/night_start</code></p>
+            <p><strong>Status:</strong> <code>)" MQTT_TOPIC_PREFIX_LITERAL R"(/status</code></p>
         </div>
     </div>
 </body>
 </html>
 )";
-  return html;
-}
 
-String WebOTAManager::getStatusHTML()
-{
-  String html = R"(
+static const char STATUS_HTML[] PROGMEM = R"(
 <!DOCTYPE html>
 <html>
 <head>
@@ -164,32 +154,27 @@ String WebOTAManager::getStatusHTML()
 
         <div class="metric">
             <span>Free Heap Memory:</span>
-            <span class="value">)" +
-                String(ESP.getFreeHeap()) + R"( bytes</span>
+            <span class="value">%FREE_HEAP% bytes</span>
         </div>
 
         <div class="metric">
             <span>Uptime:</span>
-            <span class="value">)" +
-                String(millis() / 1000) + R"( seconds</span>
+            <span class="value">%UPTIME% seconds</span>
         </div>
 
         <div class="metric">
             <span>WiFi Signal:</span>
-            <span class="value">)" +
-                String(WiFi.RSSI()) + R"( dBm</span>
+            <span class="value">%RSSI% dBm</span>
         </div>
 
         <div class="metric">
             <span>Flash Size:</span>
-            <span class="value">)" +
-                String(ESP.getFlashChipSize()) + R"( bytes</span>
+            <span class="value">%FLASH_SIZE% bytes</span>
         </div>
 
         <div class="metric">
             <span>SDK Version:</span>
-            <span class="value">)" +
-                String(ESP.getSdkVersion()) + R"(</span>
+            <span class="value">%SDK_VERSION%</span>
         </div>
 
         <p><a href="/">← Back to Home</a></p>
@@ -198,5 +183,24 @@ String WebOTAManager::getStatusHTML()
 </body>
 </html>
 )";
+
+String WebOTAManager::getIndexHTML()
+{
+  String html = FPSTR(INDEX_HTML);
+  html.replace(F("%IP%"), WiFi.localIP().toString());
+  html.replace(F("%HOSTNAME%"), DEVICE_HOSTNAME);
+  html.replace(F("%MAC%"), WiFi.macAddress());
+  html.replace(F("%UPTIME%"), String(millis() / 1000));
+  return html;
+}
+
+String WebOTAManager::getStatusHTML()
+{
+  String html = FPSTR(STATUS_HTML);
+  html.replace(F("%FREE_HEAP%"), String(ESP.getFreeHeap()));
+  html.replace(F("%UPTIME%"), String(millis() / 1000));
+  html.replace(F("%RSSI%"), String(WiFi.RSSI()));
+  html.replace(F("%FLASH_SIZE%"), String(ESP.getFlashChipSize()));
+  html.replace(F("%SDK_VERSION%"), ESP.getSdkVersion());
   return html;
 }

@@ -96,17 +96,10 @@ void DisplayManager::performBrightnessAnimation()
   serviceDelay(500);
 }
 
-void DisplayManager::showUpdateIndicator()
-{
-  matrix.drawPixel(0, 4, HIGH);
-  matrix.drawPixel(0, 3, HIGH);
-  matrix.drawPixel(0, 2, HIGH);
-  matrix.write();
-}
-
 void DisplayManager::initializeMatrix()
 {
-  Serial.println("Number of LED Displays: " + String(NUMBER_OF_HORIZONTAL_DISPLAYS));
+  Serial.print(F("Number of LED Displays: "));
+  Serial.println(NUMBER_OF_HORIZONTAL_DISPLAYS);
   setIntensity(0); // Start with brightness 0
 
   // Use real CP437 mapping so high-range glyphs (e.g. the degree sign at
@@ -122,7 +115,7 @@ void DisplayManager::initializeMatrix()
     matrix.setPosition(i, maxPos - i - 1, 0);
   }
 
-  Serial.println("Matrix initialized");
+  Serial.println(F("Matrix initialized"));
   matrix.fillScreen(LOW);
   centerPrint("Witaj");
 }
